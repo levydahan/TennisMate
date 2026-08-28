@@ -127,11 +127,35 @@ body {
 
 .meta { margin: 4px 0 12px; color: var(--muted); font-weight: 600; }
 
-.spots {
+.list-head {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  font-weight: 800;
+  gap: 10px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.list-head .spots {
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.refresh-btn {
+  font: inherit;
+  font-weight: 800;
+  border: 0;
+  cursor: pointer;
+  border-radius: 14px;
+  background: #14532d;
+  color: #d9f99d;
+  padding: 8px 14px;
+  min-height: 44px;
+  flex: none;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
 }
 
 .bar {

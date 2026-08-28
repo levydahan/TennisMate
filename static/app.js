@@ -119,6 +119,8 @@ function renderHistory(game) {
     </div>
   `;
 }
+
+function renderGame(game) {
   const statusClass = game.is_open ? "open" : game.is_past ? "past" : "closed";
   const filled = (game.count / game.max_players) * 100;
   const canJoin = game.is_open || state.is_admin;
@@ -150,7 +152,10 @@ function renderHistory(game) {
         <span class="status ${statusClass}">${esc(game.status_he)}</span>
       </div>
       <p class="muted">${esc(game.status_detail)}</p>
-      <div class="spots"><span>${game.count}/${game.max_players} שחקנים</span><span>${game.spots_left} מקומות פנויים</span></div>
+      <div class="list-head">
+        <div class="spots"><span>${game.count}/${game.max_players} שחקנים</span><span>${game.spots_left} מקומות פנויים</span></div>
+        <button class="refresh-btn" type="button" data-refresh="${game.slot}">רענון</button>
+      </div>
       <div class="bar"><span style="width:${filled}%"></span></div>
       <ul class="player-list">${rosterHtml}</ul>
       ${waitingHtml}
@@ -236,6 +241,14 @@ gamesEl.addEventListener("submit", async (e) => {
 });
 
 gamesEl.addEventListener("click", async (e) => {
+  const refreshBtn = e.target.closest("[data-refresh]");
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    const data = await api("/api/state");
+    applyState(data);
+    showToast("הרשימה עודכנה");
+    return;
+  }
   const removeBtn = e.target.closest("[data-remove]");
   if (removeBtn) {
     const data = await api("/api/admin/remove", { id: Number(removeBtn.dataset.remove) });
