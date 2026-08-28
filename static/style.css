@@ -129,9 +129,58 @@ body {
   font-size: 0.82rem;
 }
 
-.hero-card h2, .game-card h3, .field-card h2, .stats-card h2 {
+.hero-card h2, .hero-title, .game-card h3, .field-card h2, .stats-card h2 {
   margin: 0 0 8px;
   font-size: 1.45rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.hero-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+
+.hero-toggle-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.hero-toggle .kicker { margin-bottom: 2px; }
+.hero-toggle .hero-title { margin: 0; display: block; }
+
+.hero-toggle-action {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  min-width: 72px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: #e5e7eb;
+  color: #14532d;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.hero-card.collapsed {
+  padding-bottom: 12px;
+}
+
+.hero-card.collapsed .hero-body {
+  display: none;
 }
 
 .muted { color: var(--muted); margin: 0 0 12px; line-height: 1.45; }
@@ -376,22 +425,99 @@ body {
   padding: 0;
 }
 
-.stats-list li {
+.stats-list li,
+.stats-player {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 14px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 16px;
   background: #f0fdf4;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   font-weight: 800;
-  min-height: 48px;
+}
+
+.stats-name {
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.stats-graphs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.stats-metric {
+  min-width: 0;
+  background: #ffffffcc;
+  border-radius: 12px;
+  padding: 8px 8px 7px;
+}
+
+.stats-metric-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #365314;
+  margin-bottom: 6px;
+}
+
+.stats-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e5e7eb;
+  direction: ltr;
+}
+
+.stats-bar.empty { background: #e5e7eb; }
+
+.bar-arrived { background: #16a34a; height: 100%; }
+.bar-missed { background: #f87171; height: 100%; }
+.bar-booked { background: #ca8a04; height: 100%; }
+.bar-idle { background: #d1d5db; height: 100%; }
+
+.stats-metric-nums {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  margin-top: 6px;
+}
+
+.sparkline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 6px;
+  min-height: 10px;
+}
+
+.spark-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.spark-dot.on-arrived { background: #16a34a; }
+.spark-dot.off-missed { background: #fecaca; }
+.spark-dot.on-booked { background: #ca8a04; }
+.spark-dot.off-idle { background: #e5e7eb; }
+
+.spark-empty {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #9ca3af;
 }
 
 .stats-nums { display: flex; gap: 10px; flex-wrap: wrap; font-size: 0.9rem; }
 .arrived-n { color: var(--ok); }
 .missed-n { color: var(--danger); }
+.booked-n { color: #a16207; }
 
 .primary-btn, .ghost-btn, .danger-btn, .tiny-btn {
   font: inherit;

@@ -5,7 +5,7 @@ import unittest
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["SECRET_KEY"] = "test"
 
-from app import Enrollment, app, db
+from app import Enrollment, GameSettings, app, db
 from players import FIXED_PLAYERS
 
 
@@ -119,9 +119,14 @@ class JoinAndWaitlistTests(unittest.TestCase):
         self.assertIn("לוי", history_names)
         stats = {p["name"]: p for p in data["stats"]["players"]}
         self.assertGreaterEqual(data["stats"]["games"], 1)
+        self.assertEqual([p["name"] for p in data["stats"]["players"]], list(FIXED_PLAYERS))
         self.assertEqual(stats["לוי"]["arrived"], 1)
         self.assertEqual(stats["שירן"]["arrived"], 1)
         self.assertEqual(stats["אבירם"]["missed"], 1)
+        self.assertEqual(stats["לוי"]["arrival_history"], [1])
+        self.assertEqual(stats["אבירם"]["arrival_history"], [0])
+        self.assertEqual(stats["לוי"]["booked"], 0)
+        self.assertEqual(stats["לוי"]["booker_history"], [0])
 
     def test_squad_lists_fixed_names_and_alias(self):
         self._login_admin()
@@ -144,6 +149,41 @@ class JoinAndWaitlistTests(unittest.TestCase):
         missed = [p["name"] for p in sunday["squad"] if p["status"] == "out"]
         self.assertIn("עידן", arrived)
         self.assertIn("שירן", missed)
+
+    def test_stats_track_booker_history(self):
+        self._login_admin()
+        current = self.client.get("/api/state").get_json()["games"][0]["week_key"]
+        from datetime import date, timedelta
+        prev = (date.fromisoformat(current) - timedelta(days=7)).isoformat()
+        with app.app_context():
+            levi = Enrollment(
+                slot="sunday",
+                week_key=prev,
+                name="לוי",
+                name_key="לוי",
+                is_waitlist=False,
+            )
+            shiran = Enrollment(
+                slot="sunday",
+                week_key=prev,
+                name="שירן",
+                name_key="שירן",
+                is_waitlist=False,
+            )
+            db.session.add_all([levi, shiran])
+            db.session.flush()
+            db.session.add(GameSettings(slot="sunday", week_key=prev, booker_id=shiran.id))
+            db.session.commit()
+        data = self.client.get("/api/state").get_json()
+        stats = {p["name"]: p for p in data["stats"]["players"]}
+        self.assertEqual(len(data["stats"]["players"]), 9)
+        self.assertEqual(stats["שירן"]["booked"], 1)
+        self.assertEqual(stats["שירן"]["booker_history"], [1])
+        self.assertEqual(stats["לוי"]["booked"], 0)
+        self.assertEqual(stats["לוי"]["booker_history"], [0])
+        self.assertEqual(stats["לוי"]["arrived"], 1)
+        self.assertEqual(stats["עידן"]["missed"], 1)
+        self.assertEqual(stats["עידן"]["not_booked"], 1)
 
     def test_pay_reminder_skips_empty_and_sends_share(self):
         empty = self.client.post("/api/admin/pay-reminder", json={})

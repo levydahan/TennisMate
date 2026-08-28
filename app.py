@@ -336,9 +336,20 @@ def squad_for(roster: list[dict], waiting: list[dict]) -> list[dict]:
 
 
 def attendance_stats() -> dict:
-    """Count arrived vs missed for finished games only."""
-    tallies = {name: {"name": name, "arrived": 0, "missed": 0} for name in FIXED_PLAYERS}
-    finished_games = 0
+    """Arrival and court-booker history for finished games, per fixed player."""
+    spark_max = 16
+    tallies = {
+        name: {
+            "name": name,
+            "arrived": 0,
+            "missed": 0,
+            "booked": 0,
+            "arrival_history": [],
+            "booker_history": [],
+        }
+        for name in FIXED_PLAYERS
+    }
+    finished = []
     for slot in ("sunday", "wednesday"):
         current = get_slot_state(slot)
         week_keys = [
@@ -356,19 +367,42 @@ def attendance_stats() -> dict:
             rows = Enrollment.query.filter_by(slot=slot, week_key=week_key, is_waitlist=False).all()
             if not rows:
                 continue
-            finished_games += 1
             arrived_names = set()
+            roster_by_id = {}
             for row in rows:
                 canon = canonical_player(row.name)
-                if canon:
-                    arrived_names.add(canon)
-            for name in FIXED_PLAYERS:
-                if name in arrived_names:
-                    tallies[name]["arrived"] += 1
-                else:
-                    tallies[name]["missed"] += 1
-    players = sorted(tallies.values(), key=lambda row: (-row["arrived"], row["name"]))
-    return {"games": finished_games, "players": players}
+                if not canon:
+                    continue
+                arrived_names.add(canon)
+                roster_by_id[row.id] = canon
+            settings = GameSettings.query.filter_by(slot=slot, week_key=week_key).first()
+            booker_name = None
+            if settings and settings.booker_id:
+                booker_name = roster_by_id.get(settings.booker_id)
+            finished.append((week_key, slot, arrived_names, booker_name))
+
+    finished.sort(key=lambda item: (item[0], item[1]))
+    for _week_key, _slot, arrived_names, booker_name in finished:
+        for name in FIXED_PLAYERS:
+            row = tallies[name]
+            arrived = name in arrived_names
+            row["arrived" if arrived else "missed"] += 1
+            row["arrival_history"].append(1 if arrived else 0)
+            booked = booker_name == name
+            if booked:
+                row["booked"] += 1
+            row["booker_history"].append(1 if booked else 0)
+
+    players = []
+    for name in FIXED_PLAYERS:
+        row = tallies[name]
+        total = row["arrived"] + row["missed"]
+        row["not_booked"] = max(total - row["booked"], 0)
+        if len(row["arrival_history"]) > spark_max:
+            row["arrival_history"] = row["arrival_history"][-spark_max:]
+            row["booker_history"] = row["booker_history"][-spark_max:]
+        players.append(row)
+    return {"games": len(finished), "players": players}
 
 
 def history_for_slot(slot: str, current_week_key: str) -> list[dict]:

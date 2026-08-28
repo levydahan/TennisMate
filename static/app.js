@@ -273,27 +273,72 @@ function renderField(games) {
   }).join("");
 }
 
+function sparkDots(history, onClass, offClass) {
+  const bits = Array.isArray(history) ? history : [];
+  if (!bits.length) {
+    return `<span class="spark-empty">אין עדיין</span>`;
+  }
+  return bits.map((bit) =>
+    `<span class="spark-dot ${bit ? onClass : offClass}"></span>`
+  ).join("");
+}
+
+function stackedBar(onCount, offCount, onClass, offClass) {
+  const total = Math.max(0, (onCount || 0) + (offCount || 0));
+  if (!total) {
+    return `<div class="stats-bar empty" aria-hidden="true"></div>`;
+  }
+  const onPct = Math.round((onCount / total) * 100);
+  return `
+    <div class="stats-bar" aria-hidden="true">
+      <span class="${onClass}" style="width:${onPct}%"></span>
+      <span class="${offClass}" style="width:${100 - onPct}%"></span>
+    </div>
+  `;
+}
+
 function renderStats() {
   const stats = state.stats || { games: 0, players: [] };
   const testBtn = state.is_admin
     ? `<button class="tiny-btn" data-pay-reminder type="button">בדיקת תזכורת תשלום</button>`
     : "";
-  if (!stats.games) {
-    statsListsEl.innerHTML = `<p class="muted">עדיין אין משחקים שהסתיימו. אחרי משחק, יופיע כאן מי הגיע ומי לא.</p>${testBtn}`;
-    return;
-  }
+  const players = stats.players || [];
+  const emptyNote = stats.games
+    ? ""
+    : `<p class="muted">עדיין אין משחקים שהסתיימו. אחרי משחק יופיעו כאן היסטוריית הגעה והזמנת מגרש.</p>`;
   statsListsEl.innerHTML = `
-    <p class="stats-count">${stats.games} משחקים שהסתיימו</p>
+    ${emptyNote}
+    <p class="stats-count">${stats.games || 0} משחקים שהסתיימו</p>
     <ul class="stats-list">
-      ${stats.players.map((p) => `
-        <li>
+      ${players.map((p) => {
+        const arrived = p.arrived || 0;
+        const missed = p.missed || 0;
+        const booked = p.booked || 0;
+        const notBooked = p.not_booked != null ? p.not_booked : Math.max((arrived + missed) - booked, 0);
+        return `
+        <li class="stats-player">
           <span class="stats-name">${esc(p.name)}</span>
-          <span class="stats-nums">
-            <span class="arrived-n">${p.arrived} הגיע</span>
-            <span class="missed-n">${p.missed} לא הגיע</span>
-          </span>
-        </li>
-      `).join("")}
+          <div class="stats-graphs">
+            <div class="stats-metric">
+              <span class="stats-metric-label">הגעה</span>
+              ${stackedBar(arrived, missed, "bar-arrived", "bar-missed")}
+              <span class="stats-metric-nums">
+                <span class="arrived-n">${arrived} הגיע</span>
+                <span class="missed-n">${missed} לא</span>
+              </span>
+              <div class="sparkline" title="היסטוריית הגעה">${sparkDots(p.arrival_history, "on-arrived", "off-missed")}</div>
+            </div>
+            <div class="stats-metric">
+              <span class="stats-metric-label">הזמנת מגרש</span>
+              ${stackedBar(booked, notBooked, "bar-booked", "bar-idle")}
+              <span class="stats-metric-nums">
+                <span class="booked-n">${booked} הזמין</span>
+              </span>
+              <div class="sparkline" title="היסטוריית הזמנה">${sparkDots(p.booker_history, "on-booked", "off-idle")}</div>
+            </div>
+          </div>
+        </li>`;
+      }).join("")}
     </ul>
     ${testBtn}
   `;
@@ -547,8 +592,39 @@ function scheduleLocalReminders(registration) {
   }, "_hour");
 }
 
+const HERO_COLLAPSE_KEY = "tm-hero-collapsed";
+
+function applyHeroCollapsed(collapsed) {
+  const card = document.getElementById("heroCard");
+  const btn = document.getElementById("heroToggle");
+  const action = btn && btn.querySelector(".hero-toggle-action");
+  if (!card || !btn) return;
+  card.classList.toggle("collapsed", collapsed);
+  btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  if (action) action.textContent = collapsed ? "הרחב" : "מזער";
+}
+
+function initHeroToggle() {
+  const btn = document.getElementById("heroToggle");
+  if (!btn) return;
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem(HERO_COLLAPSE_KEY) === "1";
+  } catch (e) {}
+  applyHeroCollapsed(collapsed);
+  btn.addEventListener("click", () => {
+    const next = !document.getElementById("heroCard").classList.contains("collapsed");
+    applyHeroCollapsed(next);
+    try {
+      localStorage.setItem(HERO_COLLAPSE_KEY, next ? "1" : "0");
+    } catch (e) {}
+  });
+}
+
 const notifyBtn = document.getElementById("notifyBtn");
 if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
+
+initHeroToggle();
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
