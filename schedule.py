@@ -8,6 +8,9 @@ import random
 TZ = ZoneInfo("Asia/Jerusalem")
 GAME_TIME = time(20, 0)
 DRAW_TIME = time(19, 59)
+HOUR_BEFORE_TIME = time(19, 0)
+REMATCH_TIME = time(21, 0)
+PAY_REMIND_TIME = time(21, 1)
 ENROLL_OPEN_TIME = time(21, 30)
 MAX_PLAYERS = 6
 FIELD_COST_NIS = 60
@@ -41,6 +44,30 @@ def now_il() -> datetime:
     return datetime.now(TZ)
 
 
+MATCH_WEEKDAYS = {spec["weekday"] for spec in SLOTS.values()}
+
+
+def is_match_day(now: datetime | None = None) -> bool:
+    """True on Sunday and Wednesday in Israel time."""
+    now = now_il() if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=TZ)
+    else:
+        now = now.astimezone(TZ)
+    return now.weekday() in MATCH_WEEKDAYS
+
+
+def todays_match_game_at(now: datetime | None = None) -> datetime | None:
+    now = now_il() if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=TZ)
+    else:
+        now = now.astimezone(TZ)
+    if not is_match_day(now):
+        return None
+    return datetime.combine(now.date(), GAME_TIME, tzinfo=TZ)
+
+
 def format_dt_he(dt: datetime) -> str:
     return f"{DAYS_HE[dt.weekday()]} {dt.strftime('%d.%m.%Y')} בשעה {dt.strftime('%H:%M')}"
 
@@ -50,16 +77,85 @@ def draw_teams(players: list, rng: random.Random | None = None) -> list[dict]:
     rng = rng or random.Random()
     shuffled = list(players)
     rng.shuffle(shuffled)
-    teams = []
+    return _chunks_to_teams(_pair_chunks(shuffled))
+
+
+def _pair_chunks(players: list) -> list[list]:
+    chunks = []
     i = 0
-    while i < len(shuffled):
-        chunk = shuffled[i : i + 2]
+    while i < len(players):
+        chunks.append(players[i : i + 2])
+        i += 2
+    return chunks
+
+
+def _chunks_to_teams(chunks: list[list]) -> list[dict]:
+    teams = []
+    for chunk in chunks:
         teams.append({
             "label": f"קבוצה {TEAM_LETTERS[len(teams)]}",
             "players": chunk,
         })
-        i += 2
     return teams
+
+
+def _pair_key(chunk: list) -> frozenset | None:
+    ids = [player["id"] for player in chunk]
+    if len(ids) == 2:
+        return frozenset(ids)
+    return None
+
+
+def forbidden_pairs(teams: list | None) -> set[frozenset]:
+    keys = set()
+    for team in teams or []:
+        key = _pair_key(team.get("players") or [])
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _even_pairings(players: list):
+    if not players:
+        yield []
+        return
+    first = players[0]
+    for i in range(1, len(players)):
+        partner = players[i]
+        remaining = players[1:i] + players[i + 1 :]
+        for rest in _even_pairings(remaining):
+            yield [[first, partner]] + rest
+
+
+def generate_pairings(players: list):
+    players = list(players)
+    n = len(players)
+    if n == 0:
+        yield []
+        return
+    if n % 2 == 1:
+        for i, leftover in enumerate(players):
+            rest = players[:i] + players[i + 1 :]
+            for pairing in _even_pairings(rest):
+                yield pairing + [[leftover]]
+        return
+    yield from _even_pairings(players)
+
+
+def draw_rematch(players: list, hour1_teams: list | None, rng: random.Random | None = None) -> list[dict]:
+    """Pair again, avoiding first-hour partners whenever any alternative exists."""
+    rng = rng or random.Random()
+    if len(players) < 2:
+        return draw_teams(players, rng)
+    forbidden = forbidden_pairs(hour1_teams)
+    candidates = list(generate_pairings(players))
+    rng.shuffle(candidates)
+
+    def repeats(chunks: list[list]) -> int:
+        return sum(1 for chunk in chunks if (key := _pair_key(chunk)) and key in forbidden)
+
+    best = min(candidates, key=repeats)
+    return _chunks_to_teams(best)
 
 
 def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
@@ -115,7 +211,9 @@ def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
         is_past = now >= game_dt
 
     draw_dt = datetime.combine(week_date, DRAW_TIME, tzinfo=TZ)
+    rematch_dt = datetime.combine(week_date, REMATCH_TIME, tzinfo=TZ)
     teams_ready = now >= draw_dt
+    rematch_ready = now >= rematch_dt
 
     if is_open:
         status_he = "ההרשמה פתוחה"
@@ -134,12 +232,15 @@ def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
         "game_at": game_dt.isoformat(),
         "open_at": open_dt.isoformat(),
         "draw_at": draw_dt.isoformat(),
+        "rematch_at": rematch_dt.isoformat(),
         "game_at_he": format_dt_he(game_dt),
         "open_at_he": format_dt_he(open_dt),
         "draw_at_he": format_dt_he(draw_dt),
+        "rematch_at_he": format_dt_he(rematch_dt),
         "is_open": is_open,
         "is_past": is_past,
         "teams_ready": teams_ready,
+        "rematch_ready": rematch_ready,
         "status_he": status_he,
         "status_detail": status_detail,
         "max_players": MAX_PLAYERS,

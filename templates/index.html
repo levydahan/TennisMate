@@ -11,10 +11,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=5" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=9" />
 </head>
 <body>
   <div class="page">
+  <div id="matchBanner" class="match-banner" hidden>
+    <div class="match-banner-title">יום המשחק הגיע</div>
+    <div id="matchCountdown" class="match-countdown"></div>
+  </div>
   <header class="topbar">
     <div class="brand">
       <img class="brand-icon" src="{{ url_for('static', filename='racket.svg') }}" alt="" width="44" height="44" />
@@ -30,17 +35,26 @@
     <section class="hero-card">
       <p class="kicker">לוח המשחקים</p>
       <h2>ראשון ורביעי ב־20:00</h2>
-      <p class="muted">עד 6 שחקנים בכל משחק. אחרי שהרשימה מתמלאת מצטרפים לרשימת המתנה.</p>
+      <p class="muted">סמנו את השם שלכם כדי להצטרף. הרשימה קבועה — אי אפשר להוסיף או לשנות שמות. עד 6 שחקנים במגרש, אחר כך ממתינים.</p>
       <ul class="rules">
         <li>הרשמה לראשון: מיום חמישי 21:30</li>
         <li>הרשמה לרביעי: מיום שני 21:30</li>
-        <li>ביום המשחק ב־19:59 הגרלת קבוצות אוטומטית · זוגות</li>
+        <li>ביום המשחק ב־19:59 הגרלת זוגות, וב־21:00 הגרלה מחדש בלי אותם זוגות</li>
         <li>רק המנהל יכול להסיר שחקנים</li>
         <li>כל שבוע נפתחת הרשמה חדשה והקודמת נשמרת</li>
+        <li>שעה לפני המשחק תזכורת, וב־21:01 תזכורת לשלם את חלקכם במגרש</li>
       </ul>
+      <button id="notifyBtn" class="primary-btn notify-btn" type="button">הפעלת תזכורת תשלום</button>
+      <p class="muted notify-note">אחרי אישור התראות: שעה לפני המשחק, ואחרי המשחק ב־21:01 תזכורת תשלום עם הסכום. ב-Render חברו Cron ל־/api/cron/pay-reminder. בלי זה הדף צריך להישאר פתוח, או להתקין את האפליקציה.</p>
     </section>
 
     <div id="games" class="games"></div>
+
+    <section class="stats-card" id="statsSection">
+      <h2>סטטיסטיקה</h2>
+      <p class="muted">כמה פעמים כל שחקן הגיע למשחק, וכמה פעמים לא הגיע — לפי משחקים שהסתיימו.</p>
+      <div id="statsLists"></div>
+    </section>
 
     <section class="field-card" id="fieldSection">
       <div class="field-head">
@@ -67,6 +81,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=5"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=9"></script>
 </body>
 </html>

@@ -4,12 +4,33 @@ import json
 from datetime import date, datetime, timezone
 from functools import wraps
 
-from flask import Flask, jsonify, render_template, request, session
+from flask import Flask, jsonify, render_template, request, send_from_directory, session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
-from schedule import FIELD_COST_NIS, GAME_TIME, MAX_PLAYERS, TZ, draw_teams, format_dt_he, get_slot_state, now_il
+from players import FIXED_PLAYERS, canonical_player, normalize_name
+from reminders import (
+    build_hour_before_message,
+    build_pay_message,
+    hour_before_is_due,
+    next_hour_before_at,
+    next_pay_reminder_at,
+    reminder_is_due,
+)
+from schedule import (
+    FIELD_COST_NIS,
+    GAME_TIME,
+    MAX_PLAYERS,
+    TZ,
+    draw_teams,
+    draw_rematch,
+    format_dt_he,
+    get_slot_state,
+    is_match_day,
+    now_il,
+    todays_match_game_at,
+)
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "tennismate-dev-secret")
@@ -88,10 +109,55 @@ class GameSettings(db.Model):
     booker_id = db.Column(db.Integer, nullable=True)
     teams_json = db.Column(db.Text, nullable=True)
     teams_ids = db.Column(db.String(200), nullable=True)
+    teams2_json = db.Column(db.Text, nullable=True)
+    teams2_ids = db.Column(db.String(200), nullable=True)
 
     __table_args__ = (
         db.UniqueConstraint("slot", "week_key", name="uq_settings_slot_week"),
     )
+
+
+class PushSubscription(db.Model):
+    __tablename__ = "push_subscriptions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    endpoint = db.Column(db.Text, nullable=False, unique=True)
+    p256dh = db.Column(db.String(200), nullable=False)
+    auth = db.Column(db.String(200), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class PayReminderLog(db.Model):
+    __tablename__ = "pay_reminder_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    slot = db.Column(db.String(20), nullable=False)
+    week_key = db.Column(db.String(16), nullable=False)
+    sent_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.UniqueConstraint("slot", "week_key", name="uq_pay_reminder_slot_week"),
+    )
+
+
+class HourBeforeLog(db.Model):
+    __tablename__ = "hour_before_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    slot = db.Column(db.String(20), nullable=False)
+    week_key = db.Column(db.String(16), nullable=False)
+    sent_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.UniqueConstraint("slot", "week_key", name="uq_hour_before_slot_week"),
+    )
+
+
+class AppSetting(db.Model):
+    __tablename__ = "app_settings"
+
+    key = db.Column(db.String(80), primary_key=True)
+    value = db.Column(db.Text, nullable=False)
 
 
 _db_ready = False
@@ -109,13 +175,19 @@ def init_db():
 
 def _ensure_schema():
     inspector = inspect(db.engine)
-    if "enrollments" not in inspector.get_table_names():
-        return
-    columns = {col["name"] for col in inspector.get_columns("enrollments")}
-    if "paid" not in columns:
-        default_sql = "FALSE" if db.engine.dialect.name == "postgresql" else "0"
+    if "enrollments" in inspector.get_table_names():
+        columns = {col["name"] for col in inspector.get_columns("enrollments")}
+        if "paid" not in columns:
+            default_sql = "FALSE" if db.engine.dialect.name == "postgresql" else "0"
+            with db.engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE enrollments ADD COLUMN paid BOOLEAN DEFAULT {default_sql}"))
+    if "game_settings" in inspector.get_table_names():
+        columns = {col["name"] for col in inspector.get_columns("game_settings")}
         with db.engine.begin() as conn:
-            conn.execute(text(f"ALTER TABLE enrollments ADD COLUMN paid BOOLEAN DEFAULT {default_sql}"))
+            if "teams2_json" not in columns:
+                conn.execute(text("ALTER TABLE game_settings ADD COLUMN teams2_json TEXT"))
+            if "teams2_ids" not in columns:
+                conn.execute(text("ALTER TABLE game_settings ADD COLUMN teams2_ids VARCHAR(200)"))
 
 
 # Do not block gunicorn import on Postgres. Render marks the deploy failed if
@@ -137,11 +209,6 @@ def _ensure_db():
         app.logger.exception("Database unavailable")
         if request.path.startswith("/api/"):
             return jsonify({"ok": False, "message": "מסד הנתונים לא זמין. בדקו את DATABASE_URL ב-Render."}), 503
-
-
-def normalize_name(raw: str) -> tuple[str, str]:
-    name = " ".join((raw or "").split())
-    return name, name.casefold()
 
 
 def admin_required(fn):
@@ -178,25 +245,45 @@ def roster_fingerprint(roster: list[dict]) -> str:
     return ",".join(str(player["id"]) for player in roster)
 
 
-def ensure_teams(slot: str, week_key: str, roster: list[dict], teams_ready: bool) -> list | None:
+def ensure_teams(
+    slot: str, week_key: str, roster: list[dict], teams_ready: bool, rematch_ready: bool = False
+) -> tuple[list | None, list | None]:
     settings = get_settings(slot, week_key)
     if not teams_ready:
-        if settings.teams_json or settings.teams_ids:
+        if settings.teams_json or settings.teams_ids or settings.teams2_json or settings.teams2_ids:
             settings.teams_json = None
             settings.teams_ids = None
+            settings.teams2_json = None
+            settings.teams2_ids = None
             db.session.commit()
-        return None
+        return None, None
     ids = roster_fingerprint(roster)
     if settings.teams_json and settings.teams_ids == ids:
-        return json.loads(settings.teams_json)
-    teams = draw_teams(roster) if roster else []
-    settings.teams_json = json.dumps(teams, ensure_ascii=False)
-    settings.teams_ids = ids
-    db.session.commit()
-    return teams
+        hour1 = json.loads(settings.teams_json)
+    else:
+        hour1 = draw_teams(roster) if roster else []
+        settings.teams_json = json.dumps(hour1, ensure_ascii=False)
+        settings.teams_ids = ids
+        settings.teams2_json = None
+        settings.teams2_ids = None
+        db.session.commit()
+    hour2 = None
+    if rematch_ready and hour1:
+        if settings.teams2_json and settings.teams2_ids == ids:
+            hour2 = json.loads(settings.teams2_json)
+        else:
+            hour2 = draw_rematch(roster, hour1) if roster else []
+            settings.teams2_json = json.dumps(hour2, ensure_ascii=False)
+            settings.teams2_ids = ids
+            db.session.commit()
+    elif settings.teams2_json or settings.teams2_ids:
+        settings.teams2_json = None
+        settings.teams2_ids = None
+        db.session.commit()
+    return hour1, hour2
 
 
-def players_payload(slot: str, week_key: str, teams_ready: bool) -> dict:
+def players_payload(slot: str, week_key: str, teams_ready: bool, rematch_ready: bool = False) -> dict:
     rows = (
         Enrollment.query.filter_by(slot=slot, week_key=week_key)
         .order_by(Enrollment.is_waitlist.asc(), Enrollment.joined_at.asc(), Enrollment.id.asc())
@@ -212,10 +299,11 @@ def players_payload(slot: str, week_key: str, teams_ready: bool) -> dict:
     n = len(roster)
     share = round(FIELD_COST_NIS / n, 2) if n else None
     booker = next((player for player in roster if player["id"] == settings.booker_id), None)
-    teams = ensure_teams(slot, week_key, roster, teams_ready)
+    teams, teams2 = ensure_teams(slot, week_key, roster, teams_ready, rematch_ready)
     return {
         "roster": roster,
         "waiting": waiting,
+        "squad": squad_for(roster, waiting),
         "count": n,
         "spots_left": max(MAX_PLAYERS - n, 0),
         "share": share,
@@ -223,7 +311,64 @@ def players_payload(slot: str, week_key: str, teams_ready: bool) -> dict:
         "booker_id": settings.booker_id,
         "booker_name": booker["name"] if booker else None,
         "teams": teams,
+        "teams2": teams2,
     }
+
+
+def squad_for(roster: list[dict], waiting: list[dict]) -> list[dict]:
+    by_name = {}
+    for player in roster:
+        canon = canonical_player(player["name"])
+        if canon:
+            by_name[canon] = {**player, "name": canon, "status": "arrived"}
+    for player in waiting:
+        canon = canonical_player(player["name"])
+        if canon:
+            by_name[canon] = {**player, "name": canon, "status": "waitlist"}
+    squad = []
+    for name in FIXED_PLAYERS:
+        row = by_name.get(name)
+        if row:
+            squad.append({"name": name, "status": row["status"], "id": row["id"], "paid": row.get("paid", False)})
+        else:
+            squad.append({"name": name, "status": "out", "id": None, "paid": False})
+    return squad
+
+
+def attendance_stats() -> dict:
+    """Count arrived vs missed for finished games only."""
+    tallies = {name: {"name": name, "arrived": 0, "missed": 0} for name in FIXED_PLAYERS}
+    finished_games = 0
+    for slot in ("sunday", "wednesday"):
+        current = get_slot_state(slot)
+        week_keys = [
+            row[0]
+            for row in (
+                db.session.query(Enrollment.week_key)
+                .filter(Enrollment.slot == slot)
+                .distinct()
+                .all()
+            )
+        ]
+        for week_key in week_keys:
+            if week_key == current["week_key"] and not current["is_past"]:
+                continue
+            rows = Enrollment.query.filter_by(slot=slot, week_key=week_key, is_waitlist=False).all()
+            if not rows:
+                continue
+            finished_games += 1
+            arrived_names = set()
+            for row in rows:
+                canon = canonical_player(row.name)
+                if canon:
+                    arrived_names.add(canon)
+            for name in FIXED_PLAYERS:
+                if name in arrived_names:
+                    tallies[name]["arrived"] += 1
+                else:
+                    tallies[name]["missed"] += 1
+    players = sorted(tallies.values(), key=lambda row: (-row["arrived"], row["name"]))
+    return {"games": finished_games, "players": players}
 
 
 def history_for_slot(slot: str, current_week_key: str) -> list[dict]:
@@ -251,10 +396,13 @@ def history_for_slot(slot: str, current_week_key: str) -> list[dict]:
             continue
         settings = GameSettings.query.filter_by(slot=slot, week_key=week_key).first()
         teams = None
+        teams2 = None
         booker_name = None
         if settings:
             if settings.teams_json:
                 teams = json.loads(settings.teams_json)
+            if getattr(settings, "teams2_json", None):
+                teams2 = json.loads(settings.teams2_json)
             if settings.booker_id:
                 booker = next((p for p in roster if p["id"] == settings.booker_id), None)
                 booker_name = booker["name"] if booker else None
@@ -268,6 +416,7 @@ def history_for_slot(slot: str, current_week_key: str) -> list[dict]:
             "share": round(FIELD_COST_NIS / n, 2) if n else None,
             "booker_name": booker_name,
             "teams": teams,
+            "teams2": teams2,
         })
     return history
 
@@ -275,10 +424,155 @@ def history_for_slot(slot: str, current_week_key: str) -> list[dict]:
 def serialize_player(row: Enrollment) -> dict:
     return {
         "id": row.id,
-        "name": row.name,
+        "name": canonical_player(row.name) or row.name,
         "is_waitlist": row.is_waitlist,
         "paid": row.paid,
         "joined_at": row.joined_at.isoformat() if row.joined_at else None,
+    }
+
+
+def _b64url(raw: bytes) -> str:
+    import base64
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _ensure_vapid_keys() -> tuple[str, str] | tuple[None, None]:
+    public = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
+    private = os.environ.get("VAPID_PRIVATE_KEY", "").strip()
+    if public and private:
+        return public, private
+    row_pub = db.session.get(AppSetting, "vapid_public")
+    row_priv = db.session.get(AppSetting, "vapid_private")
+    if row_pub and row_priv:
+        return row_pub.value, row_priv.value
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ec
+    except ImportError:
+        return None, None
+    key = ec.generate_private_key(ec.SECP256R1())
+    from cryptography.hazmat.primitives import serialization
+    private_bytes = key.private_numbers().private_value.to_bytes(32, "big")
+    public_bytes = key.public_key().public_bytes(
+        encoding=serialization.Encoding.X962,
+        format=serialization.PublicFormat.UncompressedPoint,
+    )
+    public = _b64url(public_bytes)
+    private = _b64url(private_bytes)
+    db.session.merge(AppSetting(key="vapid_public", value=public))
+    db.session.merge(AppSetting(key="vapid_private", value=private))
+    db.session.commit()
+    return public, private
+
+
+def vapid_public_key() -> str | None:
+    try:
+        public, _private = _ensure_vapid_keys()
+    except Exception:
+        app.logger.exception("VAPID key setup failed")
+        return None
+    return public
+
+
+def _cron_authorized() -> bool:
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret") or request.args.get("secret") or "").strip()
+    if expected:
+        return hmac.compare_digest(provided, expected)
+    return not os.environ.get("RENDER")
+
+
+def dispatch_web_push(message: dict) -> int:
+    public, private = _ensure_vapid_keys()
+    if not public or not private:
+        return 0
+    try:
+        from pywebpush import webpush
+    except ImportError:
+        return 0
+    sent = 0
+    for row in PushSubscription.query.all():
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": row.endpoint,
+                    "keys": {"p256dh": row.p256dh, "auth": row.auth},
+                },
+                data=json.dumps({
+                    "title": message["title"],
+                    "body": message["body"],
+                }, ensure_ascii=False),
+                vapid_private_key=private,
+                vapid_claims={"sub": "mailto:tennismate@localhost"},
+            )
+            sent += 1
+        except Exception as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in (404, 410):
+                db.session.delete(row)
+            else:
+                app.logger.warning("Web push failed: %s", exc)
+    db.session.commit()
+    return sent
+
+
+def run_pay_reminders(force: bool = False) -> dict:
+    now = now_il()
+    sent = []
+    skipped = []
+    for slot in ("sunday", "wednesday"):
+        state = get_slot_state(slot, now)
+        players = players_payload(slot, state["week_key"], state["teams_ready"], state.get("rematch_ready", False))
+        roster = players["roster"]
+        if not roster:
+            skipped.append({"slot": slot, "reason": "empty"})
+            continue
+        if not reminder_is_due(state, now, force=force):
+            skipped.append({"slot": slot, "reason": "not_due"})
+            continue
+        already = PayReminderLog.query.filter_by(slot=slot, week_key=state["week_key"]).first()
+        if already and not force:
+            skipped.append({"slot": slot, "reason": "already_sent"})
+            continue
+        names = [canonical_player(p["name"]) or p["name"] for p in roster]
+        message = build_pay_message(state["label_he"], players["share"], names)
+        pushed = dispatch_web_push(message)
+        if not already:
+            db.session.add(PayReminderLog(slot=slot, week_key=state["week_key"]))
+            db.session.commit()
+        sent.append({
+            **message,
+            "slot": slot,
+            "week_key": state["week_key"],
+            "pushed": pushed,
+        })
+    return {"ok": True, "sent": sent, "skipped": skipped}
+
+
+def run_hour_before_reminders(force: bool = False) -> dict:
+    now = now_il()
+    if not hour_before_is_due(now, force=force):
+        return {"ok": True, "sent": [], "skipped": [{"reason": "not_due"}]}
+    if now.weekday() == 6:
+        slot = "sunday"
+    elif now.weekday() == 2:
+        slot = "wednesday"
+    else:
+        slot = "sunday" if force else None
+    if not slot:
+        return {"ok": True, "sent": [], "skipped": [{"reason": "not_match_day"}]}
+    state = get_slot_state(slot, now)
+    already = HourBeforeLog.query.filter_by(slot=slot, week_key=state["week_key"]).first()
+    if already and not force:
+        return {"ok": True, "sent": [], "skipped": [{"slot": slot, "reason": "already_sent"}]}
+    message = build_hour_before_message(state["label_he"])
+    pushed = dispatch_web_push(message)
+    if not already:
+        db.session.add(HourBeforeLog(slot=slot, week_key=state["week_key"]))
+        db.session.commit()
+    return {
+        "ok": True,
+        "sent": [{**message, "slot": slot, "week_key": state["week_key"], "pushed": pushed}],
+        "skipped": [],
     }
 
 
@@ -286,17 +580,29 @@ def public_state() -> dict:
     games = []
     for slot in ("sunday", "wednesday"):
         state = sync_slot(slot)
-        players = players_payload(slot, state["week_key"], state["teams_ready"])
+        players = players_payload(slot, state["week_key"], state["teams_ready"], state.get("rematch_ready", False))
         games.append({
             **state,
             **players,
             "history": history_for_slot(slot, state["week_key"]),
         })
+    nxt = next_pay_reminder_at()
+    hour_before = next_hour_before_at()
+    match_at = todays_match_game_at()
     return {
         "now": now_il().isoformat(),
         "is_admin": bool(session.get("is_admin")),
         "persistent": PERSISTENT_DB,
         "games": games,
+        "players": FIXED_PLAYERS,
+        "stats": attendance_stats(),
+        "vapid_public_key": vapid_public_key(),
+        "pay_reminder_at": nxt.isoformat(),
+        "pay_reminder_at_he": format_dt_he(nxt),
+        "hour_before_at": hour_before.isoformat(),
+        "hour_before_at_he": format_dt_he(hour_before),
+        "is_match_day": is_match_day(),
+        "match_game_at": match_at.isoformat() if match_at else None,
         "max_players": MAX_PLAYERS,
         "field_cost": FIELD_COST_NIS,
     }
@@ -321,15 +627,14 @@ def health():
 def api_join():
     data = request.get_json(silent=True) or {}
     slot = (data.get("slot") or "").strip()
-    name, name_key = normalize_name(data.get("name") or "")
+    name = canonical_player(data.get("name") or "")
     is_admin = bool(session.get("is_admin"))
 
     if slot not in ("sunday", "wednesday"):
         return jsonify({"ok": False, "message": "משחק לא תקין"}), 400
-    if not name or len(name) < 2:
-        return jsonify({"ok": False, "message": "נא להזין שם מלא"}), 400
-    if len(name) > 80:
-        return jsonify({"ok": False, "message": "השם ארוך מדי"}), 400
+    if not name:
+        return jsonify({"ok": False, "message": "יש לבחור שם מרשימת השחקנים"}), 400
+    _, name_key = normalize_name(name)
 
     state = sync_slot(slot)
     if not state["is_open"] and not is_admin:
@@ -496,6 +801,77 @@ def admin_clear():
     payload = public_state()
     payload.update({"ok": True, "message": "הרשימה נוקתה"})
     return jsonify(payload)
+
+
+@app.get("/sw.js")
+def service_worker():
+    response = send_from_directory(app.static_folder, "sw.js")
+    response.headers["Content-Type"] = "application/javascript; charset=utf-8"
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.get("/manifest.webmanifest")
+def web_manifest():
+    return send_from_directory(app.static_folder, "manifest.webmanifest")
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe():
+    data = request.get_json(silent=True) or {}
+    sub = data.get("subscription") or data
+    endpoint = (sub.get("endpoint") or "").strip()
+    keys = sub.get("keys") or {}
+    p256dh = (keys.get("p256dh") or "").strip()
+    auth = (keys.get("auth") or "").strip()
+    if not endpoint or not p256dh or not auth:
+        return jsonify({"ok": False, "message": "הרשמת התראות לא תקינה"}), 400
+    row = PushSubscription.query.filter_by(endpoint=endpoint).first()
+    if row:
+        row.p256dh = p256dh
+        row.auth = auth
+    else:
+        db.session.add(PushSubscription(endpoint=endpoint, p256dh=p256dh, auth=auth))
+    db.session.commit()
+    return jsonify({"ok": True, "message": "תזכורות התשלום הופעלו"})
+
+
+@app.route("/api/cron/pay-reminder", methods=["GET", "POST"])
+def cron_pay_reminder():
+    if not _cron_authorized():
+        return jsonify({"ok": False, "message": "אין הרשאה"}), 401
+    body = request.get_json(silent=True) or {}
+    force = request.args.get("force") == "1" or bool(body.get("force"))
+    pay = run_pay_reminders(force=force)
+    hour = run_hour_before_reminders(force=False)
+    sent = list(hour.get("sent") or []) + list(pay.get("sent") or [])
+    result = {
+        "ok": True,
+        "sent": sent,
+        "skipped": list(hour.get("skipped") or []) + list(pay.get("skipped") or []),
+        "hour_before": hour,
+        "pay": pay,
+    }
+    if sent:
+        result["message"] = sent[0]["body"]
+    elif not force:
+        result["message"] = "אין תזכורת כרגע"
+    else:
+        result["message"] = "אין שחקנים במגרש, אין מה לשלוח"
+    return jsonify(result)
+
+
+@app.post("/api/admin/pay-reminder")
+@admin_required
+def admin_pay_reminder():
+    result = run_pay_reminders(force=True)
+    if result["sent"]:
+        result["message"] = result["sent"][0]["body"]
+    else:
+        result["message"] = "אין שחקנים במגרש, אין מה לשלוח"
+    result["ok"] = True
+    return jsonify(result)
 
 
 if __name__ == "__main__":

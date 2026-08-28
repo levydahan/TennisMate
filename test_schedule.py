@@ -3,7 +3,7 @@ from datetime import datetime
 
 import random
 
-from schedule import TZ, draw_teams, get_slot_state
+from schedule import TZ, draw_rematch, draw_teams, forbidden_pairs, get_slot_state
 
 
 class SundayEnrollmentTests(unittest.TestCase):
@@ -76,6 +76,68 @@ class TeamDrawTests(unittest.TestCase):
         teams = draw_teams([{"id": 1, "name": "alone"}], random.Random(3))
         self.assertEqual(len(teams), 1)
         self.assertEqual(len(teams[0]["players"]), 1)
+
+    def test_rematch_avoids_first_hour_partners(self):
+        players = [{"id": i, "name": f"p{i}"} for i in range(6)]
+        hour1 = [
+            {"label": "א", "players": [players[0], players[1]]},
+            {"label": "ב", "players": [players[2], players[3]]},
+            {"label": "ג", "players": [players[4], players[5]]},
+        ]
+        hour2 = draw_rematch(players, hour1, random.Random(4))
+        self.assertEqual(len(hour2), 3)
+        self.assertEqual(forbidden_pairs(hour1) & forbidden_pairs(hour2), set())
+
+    def test_two_players_must_repeat(self):
+        players = [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
+        hour1 = draw_teams(players, random.Random(1))
+        hour2 = draw_rematch(players, hour1, random.Random(2))
+        self.assertEqual(forbidden_pairs(hour1), forbidden_pairs(hour2))
+
+    def test_rematch_ready_at_2100(self):
+        before = get_slot_state("sunday", datetime(2026, 8, 30, 20, 59, tzinfo=TZ))
+        self.assertTrue(before["teams_ready"])
+        self.assertFalse(before["rematch_ready"])
+        after = get_slot_state("sunday", datetime(2026, 8, 30, 21, 0, tzinfo=TZ))
+        self.assertTrue(after["rematch_ready"])
+
+
+class PayReminderScheduleTests(unittest.TestCase):
+    def test_due_at_2101_after_game(self):
+        from reminders import next_pay_reminder_at, reminder_is_due
+
+        before = datetime(2026, 8, 30, 21, 0, tzinfo=TZ)
+        state = get_slot_state("sunday", before)
+        self.assertTrue(state["is_past"])
+        self.assertFalse(reminder_is_due(state, before))
+
+        after = datetime(2026, 8, 30, 21, 1, tzinfo=TZ)
+        state = get_slot_state("sunday", after)
+        self.assertTrue(reminder_is_due(state, after))
+
+        nxt = next_pay_reminder_at(datetime(2026, 8, 28, 14, 0, tzinfo=TZ))
+        self.assertEqual(nxt.hour, 21)
+        self.assertEqual(nxt.minute, 1)
+        self.assertEqual(nxt.weekday(), 6)
+
+
+class MatchDayTests(unittest.TestCase):
+    def test_sunday_and_wednesday_are_match_days(self):
+        from schedule import is_match_day
+        self.assertTrue(is_match_day(datetime(2026, 8, 30, 12, 0, tzinfo=TZ)))
+        self.assertTrue(is_match_day(datetime(2026, 8, 26, 8, 0, tzinfo=TZ)))
+        self.assertFalse(is_match_day(datetime(2026, 8, 28, 14, 0, tzinfo=TZ)))
+
+    def test_hour_before_window(self):
+        from reminders import hour_before_is_due
+        sunday_1830 = datetime(2026, 8, 30, 18, 30, tzinfo=TZ)
+        sunday_1900 = datetime(2026, 8, 30, 19, 0, tzinfo=TZ)
+        sunday_2000 = datetime(2026, 8, 30, 20, 0, tzinfo=TZ)
+        friday = datetime(2026, 8, 28, 19, 0, tzinfo=TZ)
+        self.assertFalse(hour_before_is_due(sunday_1830))
+        self.assertTrue(hour_before_is_due(sunday_1900))
+        self.assertFalse(hour_before_is_due(sunday_2000))
+        self.assertFalse(hour_before_is_due(friday))
 
 
 if __name__ == "__main__":
