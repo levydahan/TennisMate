@@ -202,6 +202,18 @@ class JoinAndWaitlistTests(unittest.TestCase):
         self.assertIn("30 ₪", data["sent"][0]["body"])
         self.assertIn("לוי", data["sent"][0]["names"])
 
+    def test_state_exposes_bit_phone(self):
+        old = os.environ.get("BIT_PAY_PHONE")
+        os.environ["BIT_PAY_PHONE"] = "050-123-4567"
+        try:
+            data = self.client.get("/api/state").get_json()
+            self.assertEqual(data["bit_phone"], "0501234567")
+        finally:
+            if old is None:
+                os.environ.pop("BIT_PAY_PHONE", None)
+            else:
+                os.environ["BIT_PAY_PHONE"] = old
+
     def test_cron_pay_reminder_unauthorized_on_render(self):
         old = os.environ.get("RENDER")
         os.environ["RENDER"] = "1"

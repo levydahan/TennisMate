@@ -82,6 +82,11 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "0508716669")
 
+
+def bit_pay_phone() -> str:
+    """Digits-only Bit receive number from env. Empty if unset."""
+    return "".join(ch for ch in os.environ.get("BIT_PAY_PHONE", "") if ch.isdigit())
+
 db = SQLAlchemy(app)
 
 
@@ -643,6 +648,7 @@ def public_state() -> dict:
         "next_game_at": upcoming.isoformat(),
         "next_game_at_he": format_dt_he(upcoming),
         "next_game_label_he": DAYS_HE[upcoming.weekday()],
+        "bit_phone": bit_pay_phone() or None,
         "max_players": MAX_PLAYERS,
         "field_cost": FIELD_COST_NIS,
     }

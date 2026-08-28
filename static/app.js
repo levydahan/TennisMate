@@ -52,8 +52,12 @@ function costSplit(game) {
   return `60 ₪ ÷ ${game.count} = ${nice} ₪ לכל שחקן`;
 }
 
-function renderPlayerRow(player, index, { waitlist = false, admin = false } = {}) {
+function renderPlayerRow(player, index, { waitlist = false, admin = false, game = null } = {}) {
   const actions = [];
+  if (!waitlist && game) {
+    const pay = bitPayButton(game, player);
+    if (pay) actions.push(pay);
+  }
   if (admin) {
     if (!waitlist) {
       actions.push(`
@@ -74,6 +78,54 @@ function renderPlayerRow(player, index, { waitlist = false, admin = false } = {}
       <div class="row-actions">${actions.join("")}</div>
     </li>
   `;
+}
+
+function formatShare(share) {
+  if (share == null) return null;
+  return Number.isInteger(share) ? String(share) : share.toFixed(2);
+}
+
+function formatBitPhone(digits) {
+  if (!digits) return "";
+  if (digits.length === 10 && digits.startsWith("05")) {
+    return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  }
+  return digits;
+}
+
+function bitAppHref() {
+  const ua = navigator.userAgent || "";
+  const path = "www.bitpay.co.il/app/bitcom-info";
+  if (/android/i.test(ua)) {
+    return `intent://${path}#Intent;scheme=bit;package=com.bnhp.payments.paymentsapp;S.browser_fallback_url=https://play.google.com/store/apps/details?id=com.bnhp.payments.paymentsapp;end`;
+  }
+  if (/iphone|ipad|ipod/i.test(ua)) {
+    return `paymentsBIT://${path}`;
+  }
+  return "https://www.bitpay.co.il/he";
+}
+
+function bitPayButton(game, player) {
+  if (player.paid) return "";
+  if (game.booker_id && game.booker_id === player.id) return "";
+  const amount = formatShare(game.share);
+  if (amount == null) return "";
+  const label = `שלם בביט · ${amount} ₪`;
+  return `<a class="bit-pay" data-bit-pay data-amount="${esc(amount)}" href="${esc(bitAppHref())}">${esc(label)}</a>`;
+}
+
+function onBitPayClick(link) {
+  const amount = link.dataset.amount || "";
+  const phone = formatBitPhone(state.bit_phone || "");
+  const text = phone
+    ? `${amount} ₪ בביט למספר ${phone} · טניסמייט`
+    : `${amount} ₪ בביט למזמין המגרש · טניסמייט`;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  }
+  showToast(phone
+    ? `נפתחת ביט · שלמו ${amount} ₪ למספר ${phone}`
+    : `נפתחת ביט · שלמו ${amount} ₪ למזמין המגרש`);
 }
 
 function renderTeamGrid(teams) {
@@ -203,7 +255,7 @@ function renderGame(game) {
   const statusClass = game.is_open ? "open" : game.is_past ? "past" : "closed";
   const filled = (game.count / game.max_players) * 100;
   const emptySlots = Math.max(game.max_players - game.count, 0);
-  const rosterHtml = game.roster.map((p, i) => renderPlayerRow(p, i, { admin: state.is_admin })).join("")
+  const rosterHtml = game.roster.map((p, i) => renderPlayerRow(p, i, { admin: state.is_admin, game })).join("")
     + Array.from({ length: emptySlots }, (_, i) => `
         <li class="empty">
           <div class="row-main">
@@ -269,7 +321,10 @@ function renderField(games) {
           ${game.roster.map((p) => `
             <li class="${p.paid ? "paid" : ""} ${game.booker_id === p.id ? "booker" : ""}">
               <span>${esc(p.name)}${game.booker_id === p.id ? ' <span class="booker-tag">מזמין</span>' : ""}</span>
-              <span>${shareText(game.share)}${p.paid ? ' <span class="paid-tag">שולם</span>' : ""}</span>
+              <span class="pay-right">
+                ${shareText(game.share)}${p.paid ? ' <span class="paid-tag">שולם</span>' : ""}
+                ${bitPayButton(game, p)}
+              </span>
             </li>
           `).join("")}
         </ul>
@@ -449,6 +504,11 @@ async function refresh() {
 }
 
 gamesEl.addEventListener("click", async (e) => {
+  const bitLink = e.target.closest("[data-bit-pay]");
+  if (bitLink) {
+    onBitPayClick(bitLink);
+    return;
+  }
   const squadToggle = e.target.closest("[data-squad-toggle]");
   if (squadToggle) {
     const next = !isSquadCollapsed();
@@ -529,6 +589,11 @@ statsListsEl.addEventListener("click", async (e) => {
     new Notification(first.title, { body: first.body, dir: "rtl", lang: "he" });
   }
   payBtn.disabled = false;
+});
+
+fieldListsEl.addEventListener("click", (e) => {
+  const bitLink = e.target.closest("[data-bit-pay]");
+  if (bitLink) onBitPayClick(bitLink);
 });
 
 fieldListsEl.addEventListener("change", async (e) => {

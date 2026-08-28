@@ -341,7 +341,33 @@ body {
 .row-main { display: flex; align-items: center; min-width: 0; }
 .row-main span.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.row-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.row-actions { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+
+.bit-pay {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.82rem;
+  text-decoration: none;
+  border-radius: 12px;
+  padding: 8px 10px;
+  min-height: 40px;
+  background: #0891b2;
+  color: white;
+  white-space: nowrap;
+}
+
+.bit-pay:active { opacity: 0.85; }
+
+.pay-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 
 .join-row {
   display: flex;
