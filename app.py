@@ -19,12 +19,32 @@ app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("RENDER"))
 
 os.makedirs(app.instance_path, exist_ok=True)
 
-database_url = os.environ.get("DATABASE_URL", "").strip().strip('"').strip("'")
+database_url = (
+    os.environ.get("DATABASE_URL", "")
+    .strip()
+    .strip('"')
+    .strip("'")
+    .replace("\n", "")
+    .replace("\r", "")
+)
+_using_postgres = False
 if database_url:
     if database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql://", 1)
+        database_url = "postgresql+psycopg2://" + database_url[len("postgres://") :]
+        _using_postgres = True
+    elif database_url.startswith("postgresql+psycopg2://"):
+        _using_postgres = True
+    elif database_url.startswith("postgresql://"):
+        database_url = "postgresql+psycopg2://" + database_url[len("postgresql://") :]
+        _using_postgres = True
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True}
+    if _using_postgres:
+        engine_opts = {"pool_pre_ping": True, "pool_recycle": 300}
+        if "sslmode=" not in database_url:
+            # Internal Render URLs have no SSL; External URLs do. "allow" tries
+            # a plain connection first, then SSL — so gunicorn can start either way.
+            engine_opts["connect_args"] = {"sslmode": "allow", "connect_timeout": 8}
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = engine_opts
 else:
     data_dir = os.environ.get("DATA_DIR", app.instance_path)
     os.makedirs(data_dir, exist_ok=True)
@@ -74,10 +94,17 @@ class GameSettings(db.Model):
     )
 
 
+_db_ready = False
+
+
 def init_db():
+    global _db_ready
+    if _db_ready:
+        return
     with app.app_context():
         db.create_all()
         _ensure_schema()
+    _db_ready = True
 
 
 def _ensure_schema():
@@ -86,11 +113,30 @@ def _ensure_schema():
         return
     columns = {col["name"] for col in inspector.get_columns("enrollments")}
     if "paid" not in columns:
+        default_sql = "FALSE" if db.engine.dialect.name == "postgresql" else "0"
         with db.engine.begin() as conn:
-            conn.execute(text("ALTER TABLE enrollments ADD COLUMN paid BOOLEAN DEFAULT 0"))
+            conn.execute(text(f"ALTER TABLE enrollments ADD COLUMN paid BOOLEAN DEFAULT {default_sql}"))
 
 
-init_db()
+# Do not block gunicorn import on Postgres. Render marks the deploy failed if
+# the process dies before it binds to $PORT.
+if not _using_postgres:
+    try:
+        init_db()
+    except Exception:
+        app.logger.exception("Database setup will retry on the first request")
+
+
+@app.before_request
+def _ensure_db():
+    if _db_ready:
+        return
+    try:
+        init_db()
+    except Exception:
+        app.logger.exception("Database unavailable")
+        if request.path.startswith("/api/"):
+            return jsonify({"ok": False, "message": "מסד הנתונים לא זמין. בדקו את DATABASE_URL ב-Render."}), 503
 
 
 def normalize_name(raw: str) -> tuple[str, str]:
