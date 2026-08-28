@@ -19,12 +19,10 @@ app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("RENDER"))
 
 os.makedirs(app.instance_path, exist_ok=True)
 
-database_url = os.environ.get("DATABASE_URL", "").strip()
+database_url = os.environ.get("DATABASE_URL", "").strip().strip('"').strip("'")
 if database_url:
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
-    if database_url.startswith("postgresql") and "sslmode=" not in database_url:
-        database_url += ("&" if "?" in database_url else "?") + "sslmode=require"
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True}
 else:
