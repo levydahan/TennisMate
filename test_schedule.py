@@ -128,6 +128,16 @@ class MatchDayTests(unittest.TestCase):
         self.assertTrue(is_match_day(datetime(2026, 8, 26, 8, 0, tzinfo=TZ)))
         self.assertFalse(is_match_day(datetime(2026, 8, 28, 14, 0, tzinfo=TZ)))
 
+    def test_next_game_is_soonest_sunday_or_wednesday(self):
+        from schedule import next_game_at
+        friday = datetime(2026, 8, 28, 14, 0, tzinfo=TZ)
+        self.assertEqual(next_game_at(friday), datetime(2026, 8, 30, 20, 0, tzinfo=TZ))
+        sunday_night = datetime(2026, 8, 30, 20, 1, tzinfo=TZ)
+        nxt = next_game_at(sunday_night)
+        self.assertEqual(nxt, datetime(2026, 9, 2, 20, 0, tzinfo=TZ))
+        wed_morning = datetime(2026, 8, 26, 10, 0, tzinfo=TZ)
+        self.assertEqual(next_game_at(wed_morning), datetime(2026, 8, 26, 20, 0, tzinfo=TZ))
+
     def test_hour_before_window(self):
         from reminders import hour_before_is_due
         sunday_1830 = datetime(2026, 8, 30, 18, 30, tzinfo=TZ)

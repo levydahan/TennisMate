@@ -140,8 +140,12 @@ function renderSquad(game) {
   const missed = squad.filter((p) => p.status === "out").map((p) => p.name);
   const waiting = squad.filter((p) => p.status === "waitlist").map((p) => p.name);
   return `
-    <div class="squad">
-      <h4>מי מגיע</h4>
+    <div class="squad collapsed">
+      <button type="button" class="squad-toggle" data-squad-toggle aria-expanded="false">
+        <span class="squad-toggle-title">מי מגיע</span>
+        <span class="hero-toggle-action">הרחב</span>
+      </button>
+      <div class="squad-body">
       <ul class="name-checks">
         ${squad.map((player) => {
           const checked = player.status !== "out";
@@ -167,6 +171,7 @@ function renderSquad(game) {
         <p><strong>הגיעו:</strong> ${arrived.length ? arrived.map(esc).join(" · ") : "אין עדיין"}</p>
         <p><strong>לא הגיעו:</strong> ${missed.length ? missed.map(esc).join(" · ") : "כולם הגיעו"}</p>
         ${waiting.length ? `<p><strong>המתנה:</strong> ${waiting.map(esc).join(" · ")}</p>` : ""}
+      </div>
       </div>
     </div>
   `;
@@ -358,26 +363,54 @@ function formatCountdown(ms) {
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-function matchGameMs() {
-  if (state.match_game_at) return Date.parse(state.match_game_at);
-  if (isMatchDay()) {
-    const d = new Date();
-    d.setHours(20, 0, 0, 0);
-    return d.getTime();
-  }
-  return 0;
+function nextGameMs() {
+  if (state.next_game_at) return Date.parse(state.next_game_at);
+  const games = state.games || [];
+  const now = Date.now();
+  const upcoming = games
+    .map((g) => Date.parse(g.game_at))
+    .filter((t) => t > now)
+    .sort((a, b) => a - b);
+  return upcoming[0] || 0;
+}
+
+function matchInProgress() {
+  if (!isMatchDay()) return false;
+  const start = state.match_game_at
+    ? Date.parse(state.match_game_at)
+    : (() => {
+        const d = new Date();
+        d.setHours(20, 0, 0, 0);
+        return d.getTime();
+      })();
+  const end = start + 2 * 60 * 60 * 1000;
+  const now = Date.now();
+  return now >= start && now < end;
 }
 
 function tickCountdown() {
   const banner = document.getElementById("matchBanner");
   const el = document.getElementById("matchCountdown");
+  const title = document.getElementById("matchBannerTitle");
   if (!banner || !el) return;
-  if (!isMatchDay()) {
-    banner.hidden = true;
+  banner.hidden = false;
+  const matchDay = isMatchDay();
+  banner.classList.toggle("match-day", matchDay);
+  if (title) {
+    title.textContent = matchDay
+      ? "יום המשחק הגיע"
+      : `המשחק הבא · ${state.next_game_label_he || ""}`.trim();
+  }
+  if (matchInProgress()) {
+    el.textContent = "המשחק התחיל";
     return;
   }
-  banner.hidden = false;
-  const left = matchGameMs() - Date.now();
+  const at = nextGameMs();
+  if (!at) {
+    el.textContent = state.next_game_at_he || "";
+    return;
+  }
+  const left = at - Date.now();
   el.textContent = left <= 0 ? "המשחק התחיל" : `מתחילים בעוד ${formatCountdown(left)}`;
 }
 
@@ -399,6 +432,7 @@ function render() {
     ? `<p class="persist-warn">כדי שהרשימות לא יימחקו בעדכון ב-Render, חברו מסד PostgreSQL והגדירו DATABASE_URL.</p>`
     : "";
   gamesEl.innerHTML = warn + state.games.map(renderGame).join("");
+  applySquadCollapsed(isSquadCollapsed());
   renderField(state.games);
   renderStats();
 }
@@ -415,6 +449,15 @@ async function refresh() {
 }
 
 gamesEl.addEventListener("click", async (e) => {
+  const squadToggle = e.target.closest("[data-squad-toggle]");
+  if (squadToggle) {
+    const next = !isSquadCollapsed();
+    applySquadCollapsed(next);
+    try {
+      localStorage.setItem(SQUAD_COLLAPSE_KEY, next ? "1" : "0");
+    } catch (err) {}
+    return;
+  }
   const toggle = e.target.closest("[data-toggle-name]");
   if (toggle) {
     if (toggle.disabled) return;
@@ -593,6 +636,26 @@ function scheduleLocalReminders(registration) {
 }
 
 const HERO_COLLAPSE_KEY = "tm-hero-collapsed";
+const SQUAD_COLLAPSE_KEY = "tm-squad-collapsed";
+
+function isSquadCollapsed() {
+  try {
+    return localStorage.getItem(SQUAD_COLLAPSE_KEY) !== "0";
+  } catch (e) {
+    return true;
+  }
+}
+
+function applySquadCollapsed(collapsed) {
+  document.querySelectorAll(".squad").forEach((el) => {
+    el.classList.toggle("collapsed", collapsed);
+    const btn = el.querySelector("[data-squad-toggle]");
+    if (!btn) return;
+    btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    const action = btn.querySelector(".hero-toggle-action");
+    if (action) action.textContent = collapsed ? "הרחב" : "מזער";
+  });
+}
 
 function applyHeroCollapsed(collapsed) {
   const card = document.getElementById("heroCard");
@@ -607,9 +670,9 @@ function applyHeroCollapsed(collapsed) {
 function initHeroToggle() {
   const btn = document.getElementById("heroToggle");
   if (!btn) return;
-  let collapsed = false;
+  let collapsed = true;
   try {
-    collapsed = localStorage.getItem(HERO_COLLAPSE_KEY) === "1";
+    collapsed = localStorage.getItem(HERO_COLLAPSE_KEY) !== "0";
   } catch (e) {}
   applyHeroCollapsed(collapsed);
   btn.addEventListener("click", () => {
@@ -621,10 +684,40 @@ function initHeroToggle() {
   });
 }
 
+const STATS_COLLAPSE_KEY = "tm-stats-collapsed";
+
+function applyStatsCollapsed(collapsed) {
+  const card = document.getElementById("statsSection");
+  const btn = document.getElementById("statsToggle");
+  const action = btn && btn.querySelector(".hero-toggle-action");
+  if (!card || !btn) return;
+  card.classList.toggle("collapsed", collapsed);
+  btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  if (action) action.textContent = collapsed ? "הרחב" : "מזער";
+}
+
+function initStatsToggle() {
+  const btn = document.getElementById("statsToggle");
+  if (!btn) return;
+  let collapsed = true;
+  try {
+    collapsed = localStorage.getItem(STATS_COLLAPSE_KEY) !== "0";
+  } catch (e) {}
+  applyStatsCollapsed(collapsed);
+  btn.addEventListener("click", () => {
+    const next = !document.getElementById("statsSection").classList.contains("collapsed");
+    applyStatsCollapsed(next);
+    try {
+      localStorage.setItem(STATS_COLLAPSE_KEY, next ? "1" : "0");
+    } catch (e) {}
+  });
+}
+
 const notifyBtn = document.getElementById("notifyBtn");
 if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
 
 initHeroToggle();
+initStatsToggle();
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});

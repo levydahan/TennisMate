@@ -12,12 +12,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=11" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=15" />
 </head>
 <body>
   <div class="page">
-  <div id="matchBanner" class="match-banner" hidden>
-    <div class="match-banner-title">יום המשחק הגיע</div>
+  <div id="matchBanner" class="match-banner">
+    <div id="matchBannerTitle" class="match-banner-title">המשחק הבא</div>
     <div id="matchCountdown" class="match-countdown"></div>
   </div>
   <header class="topbar">
@@ -32,13 +32,13 @@
   </header>
 
   <main>
-    <section class="hero-card" id="heroCard">
-      <button type="button" class="hero-toggle" id="heroToggle" aria-expanded="true" aria-controls="heroBody">
+    <section class="hero-card collapsed" id="heroCard">
+      <button type="button" class="hero-toggle" id="heroToggle" aria-expanded="false" aria-controls="heroBody">
         <span class="hero-toggle-copy">
           <span class="kicker">לוח המשחקים</span>
           <span class="hero-title">ראשון ורביעי ב־20:00</span>
         </span>
-        <span class="hero-toggle-action">מזער</span>
+        <span class="hero-toggle-action">הרחב</span>
       </button>
       <div id="heroBody" class="hero-body">
         <p class="muted">סמנו את השם שלכם כדי להצטרף. הרשימה קבועה — אי אפשר להוסיף או לשנות שמות. עד 6 שחקנים במגרש, אחר כך ממתינים.</p>
@@ -56,26 +56,20 @@
     </section>
     <script>
       try {
-        if (localStorage.getItem("tm-hero-collapsed") === "1") {
+        if (localStorage.getItem("tm-hero-collapsed") === "0") {
           var card = document.getElementById("heroCard");
           var btn = document.getElementById("heroToggle");
-          if (card) card.classList.add("collapsed");
+          if (card) card.classList.remove("collapsed");
           if (btn) {
-            btn.setAttribute("aria-expanded", "false");
+            btn.setAttribute("aria-expanded", "true");
             var action = btn.querySelector(".hero-toggle-action");
-            if (action) action.textContent = "הרחב";
+            if (action) action.textContent = "מזער";
           }
         }
       } catch (e) {}
     </script>
 
     <div id="games" class="games"></div>
-
-    <section class="stats-card" id="statsSection">
-      <h2>סטטיסטיקה</h2>
-      <p class="muted">ליד כל שחקן: היסטוריית הגעה והיסטוריית הזמנת מגרש — לפי משחקים שהסתיימו.</p>
-      <div id="statsLists"></div>
-    </section>
 
     <section class="field-card" id="fieldSection">
       <div class="field-head">
@@ -85,6 +79,33 @@
       <p class="muted">הרשומים למשחק מופיעים כאן. עלות המגרש 60 ₪ מחולקת שווה בשווה. רק אחד מהם מזמין את המגרש.</p>
       <div id="fieldLists"></div>
     </section>
+
+    <section class="stats-card collapsed" id="statsSection">
+      <button type="button" class="hero-toggle" id="statsToggle" aria-expanded="false" aria-controls="statsBody">
+        <span class="hero-toggle-copy">
+          <span class="hero-title">סטטיסטיקה</span>
+        </span>
+        <span class="hero-toggle-action">הרחב</span>
+      </button>
+      <div id="statsBody" class="stats-body">
+        <p class="muted">ליד כל שחקן: היסטוריית הגעה והיסטוריית הזמנת מגרש — לפי משחקים שהסתיימו.</p>
+        <div id="statsLists"></div>
+      </div>
+    </section>
+    <script>
+      try {
+        if (localStorage.getItem("tm-stats-collapsed") === "0") {
+          var statsCard = document.getElementById("statsSection");
+          var statsBtn = document.getElementById("statsToggle");
+          if (statsCard) statsCard.classList.remove("collapsed");
+          if (statsBtn) {
+            statsBtn.setAttribute("aria-expanded", "true");
+            var statsAction = statsBtn.querySelector(".hero-toggle-action");
+            if (statsAction) statsAction.textContent = "מזער";
+          }
+        }
+      } catch (e) {}
+    </script>
   </main>
   </div>
 
@@ -102,6 +123,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=11"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=15"></script>
 </body>
 </html>

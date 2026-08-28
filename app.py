@@ -19,6 +19,7 @@ from reminders import (
     reminder_is_due,
 )
 from schedule import (
+    DAYS_HE,
     FIELD_COST_NIS,
     GAME_TIME,
     MAX_PLAYERS,
@@ -28,6 +29,7 @@ from schedule import (
     format_dt_he,
     get_slot_state,
     is_match_day,
+    next_game_at,
     now_il,
     todays_match_game_at,
 )
@@ -623,6 +625,7 @@ def public_state() -> dict:
     nxt = next_pay_reminder_at()
     hour_before = next_hour_before_at()
     match_at = todays_match_game_at()
+    upcoming = next_game_at()
     return {
         "now": now_il().isoformat(),
         "is_admin": bool(session.get("is_admin")),
@@ -637,6 +640,9 @@ def public_state() -> dict:
         "hour_before_at_he": format_dt_he(hour_before),
         "is_match_day": is_match_day(),
         "match_game_at": match_at.isoformat() if match_at else None,
+        "next_game_at": upcoming.isoformat(),
+        "next_game_at_he": format_dt_he(upcoming),
+        "next_game_label_he": DAYS_HE[upcoming.weekday()],
         "max_players": MAX_PLAYERS,
         "field_cost": FIELD_COST_NIS,
     }

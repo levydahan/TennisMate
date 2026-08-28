@@ -68,6 +68,23 @@ def todays_match_game_at(now: datetime | None = None) -> datetime | None:
     return datetime.combine(now.date(), GAME_TIME, tzinfo=TZ)
 
 
+def next_game_at(now: datetime | None = None) -> datetime:
+    """Soonest Sunday or Wednesday 20:00 that has not started yet."""
+    now = now_il() if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=TZ)
+    else:
+        now = now.astimezone(TZ)
+    candidates = []
+    for spec in SLOTS.values():
+        days_ahead = (spec["weekday"] - now.weekday()) % 7
+        dt = datetime.combine(now.date() + timedelta(days=days_ahead), GAME_TIME, tzinfo=TZ)
+        if now >= dt:
+            dt += timedelta(days=7)
+        candidates.append(dt)
+    return min(candidates)
+
+
 def format_dt_he(dt: datetime) -> str:
     return f"{DAYS_HE[dt.weekday()]} {dt.strftime('%d.%m.%Y')} בשעה {dt.strftime('%H:%M')}"
 
