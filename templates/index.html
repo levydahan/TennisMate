@@ -6,6 +6,8 @@
   <meta name="theme-color" content="#14532d" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>טניסמייט · ניהול משחקים</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='racket-icon.png') }}" />
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='racket-icon.png') }}" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
@@ -15,7 +17,7 @@
   <div class="bg-lines" aria-hidden="true"></div>
   <header class="topbar">
     <div class="brand">
-      <span class="ball" aria-hidden="true">🎾</span>
+      <img class="brand-icon" src="{{ url_for('static', filename='racket.svg') }}" alt="" width="44" height="44" />
       <div>
         <h1>טניסמייט</h1>
         <p>משחקים פעמיים בשבוע · 20:00</p>

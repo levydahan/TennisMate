@@ -54,7 +54,14 @@ body {
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand h1 { margin: 0; font-size: 1.7rem; line-height: 1.1; }
 .brand p { margin: 2px 0 0; color: #bbf7d0; font-size: 0.92rem; }
-.ball { font-size: 2rem; filter: drop-shadow(0 4px 8px rgba(0,0,0,.25)); }
+.brand-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  object-fit: cover;
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,.25));
+  flex: none;
+}
 
 .hero-card, .game-card, .field-card {
   background: var(--card);
