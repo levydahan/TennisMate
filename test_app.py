@@ -85,6 +85,25 @@ class JoinAndWaitlistTests(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertEqual(data["games"][0]["booker_name"], "ברק")
 
+    def test_keeps_previous_week_enrollments(self):
+        self._login_admin()
+        current = self.client.get("/api/state").get_json()["games"][0]["week_key"]
+        from datetime import date, timedelta
+        prev = (date.fromisoformat(current) - timedelta(days=7)).isoformat()
+        with app.app_context():
+            db.session.add(Enrollment(
+                slot="sunday",
+                week_key=prev,
+                name="ישן",
+                name_key="ישן",
+                is_waitlist=False,
+            ))
+            db.session.commit()
+        data = self.client.get("/api/state").get_json()
+        self.assertNotIn("ישן", [p["name"] for p in data["games"][0]["roster"]])
+        history_names = [p["name"] for h in data["games"][0]["history"] for p in h["roster"]]
+        self.assertIn("ישן", history_names)
+
 
 if __name__ == "__main__":
     unittest.main()

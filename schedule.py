@@ -122,7 +122,7 @@ def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
         status_detail = f"פתוחה עד {format_dt_he(game_dt)}"
     elif is_past:
         status_he = "המשחק הסתיים"
-        status_detail = f"הרשימה תתאפס ב־{format_dt_he(open_dt)}"
+        status_detail = f"הרשימה נשמרת · הרשמה חדשה ב־{format_dt_he(open_dt)}"
     else:
         status_he = "ההרשמה סגורה"
         status_detail = f"תיפתח ב־{format_dt_he(open_dt)}"

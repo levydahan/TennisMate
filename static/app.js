@@ -101,7 +101,24 @@ function renderTeams(game) {
   `;
 }
 
-function renderGame(game) {
+function renderHistory(game) {
+  if (!game.history || !game.history.length) return "";
+  return `
+    <div class="history">
+      <h4>הרשמות קודמות</h4>
+      ${game.history.map((h) => `
+        <div class="history-card">
+          <strong>${esc(h.game_at_he)}</strong>
+          <p>${h.roster.length ? h.roster.map((p) => esc(p.name)).join(" · ") : "אין נרשמים"}</p>
+          ${h.booker_name ? `<p>מזמין: ${esc(h.booker_name)}</p>` : ""}
+          ${h.teams && h.teams.length
+            ? h.teams.map((t) => `<p class="history-team">${esc(t.label)}: ${t.players.map((p) => esc(p.name)).join(", ")}</p>`).join("")
+            : ""}
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
   const statusClass = game.is_open ? "open" : game.is_past ? "past" : "closed";
   const filled = (game.count / game.max_players) * 100;
   const canJoin = game.is_open || state.is_admin;
@@ -142,6 +159,7 @@ function renderGame(game) {
         <button class="primary-btn" type="submit" ${canJoin ? "" : "disabled"}>הצטרף</button>
       </form>
       ${renderTeams(game)}
+      ${renderHistory(game)}
       ${state.is_admin ? `<div class="admin-tools"><button class="tiny-btn danger" data-clear="${game.slot}" type="button">ניקוי רשימה</button></div>` : ""}
     </article>
   `;
@@ -184,7 +202,10 @@ function renderField(games) {
 
 function render() {
   adminBtn.textContent = state.is_admin ? "יציאה ממנהל" : "מנהל";
-  gamesEl.innerHTML = state.games.map(renderGame).join("");
+  const warn = state.is_admin && state.persistent === false
+    ? `<p class="persist-warn">כדי שהרשימות לא יימחקו בעדכון ב-Render, חברו מסד PostgreSQL והגדירו DATABASE_URL.</p>`
+    : "";
+  gamesEl.innerHTML = warn + state.games.map(renderGame).join("");
   renderField(state.games);
 }
 

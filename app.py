@@ -1,7 +1,7 @@
 import os
 import hmac
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from functools import wraps
 
 from flask import Flask, jsonify, render_template, request, session
@@ -9,7 +9,7 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
-from schedule import FIELD_COST_NIS, MAX_PLAYERS, draw_teams, get_slot_state, now_il
+from schedule import FIELD_COST_NIS, GAME_TIME, MAX_PLAYERS, TZ, draw_teams, format_dt_he, get_slot_state, now_il
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "tennismate-dev-secret")
@@ -25,8 +25,12 @@ if database_url:
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 else:
-    db_path = os.path.join(app.instance_path, "tennis.db")
+    data_dir = os.environ.get("DATA_DIR", app.instance_path)
+    os.makedirs(data_dir, exist_ok=True)
+    db_path = os.path.join(data_dir, "tennis.db")
     app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
+
+PERSISTENT_DB = bool(database_url)
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -104,25 +108,13 @@ def admin_required(fn):
 
 
 def sync_slot(slot: str) -> dict:
-    state = get_slot_state(slot)
-    stale_players = Enrollment.query.filter(
-        Enrollment.slot == slot,
-        Enrollment.week_key != state["week_key"],
-    )
-    stale_settings = GameSettings.query.filter(
-        GameSettings.slot == slot,
-        GameSettings.week_key != state["week_key"],
-    )
-    changed = False
-    if stale_players.count():
-        stale_players.delete(synchronize_session=False)
-        changed = True
-    if stale_settings.count():
-        stale_settings.delete(synchronize_session=False)
-        changed = True
-    if changed:
-        db.session.commit()
-    return state
+    """Return the current game cycle. Past enrollments are kept forever."""
+    return get_slot_state(slot)
+
+
+def week_label(week_key: str) -> str:
+    day = date.fromisoformat(week_key)
+    return format_dt_he(datetime.combine(day, GAME_TIME, tzinfo=TZ))
 
 
 def get_settings(slot: str, week_key: str) -> GameSettings:
@@ -187,6 +179,52 @@ def players_payload(slot: str, week_key: str, teams_ready: bool) -> dict:
     }
 
 
+def history_for_slot(slot: str, current_week_key: str) -> list[dict]:
+    week_keys = [
+        row[0]
+        for row in (
+            db.session.query(Enrollment.week_key)
+            .filter(Enrollment.slot == slot, Enrollment.week_key != current_week_key)
+            .distinct()
+            .order_by(Enrollment.week_key.desc())
+            .limit(12)
+            .all()
+        )
+    ]
+    history = []
+    for week_key in week_keys:
+        rows = (
+            Enrollment.query.filter_by(slot=slot, week_key=week_key)
+            .order_by(Enrollment.is_waitlist.asc(), Enrollment.joined_at.asc(), Enrollment.id.asc())
+            .all()
+        )
+        roster = [serialize_player(row) for row in rows if not row.is_waitlist]
+        waiting = [serialize_player(row) for row in rows if row.is_waitlist]
+        if not roster and not waiting:
+            continue
+        settings = GameSettings.query.filter_by(slot=slot, week_key=week_key).first()
+        teams = None
+        booker_name = None
+        if settings:
+            if settings.teams_json:
+                teams = json.loads(settings.teams_json)
+            if settings.booker_id:
+                booker = next((p for p in roster if p["id"] == settings.booker_id), None)
+                booker_name = booker["name"] if booker else None
+        n = len(roster)
+        history.append({
+            "week_key": week_key,
+            "game_at_he": week_label(week_key),
+            "roster": roster,
+            "waiting": waiting,
+            "count": n,
+            "share": round(FIELD_COST_NIS / n, 2) if n else None,
+            "booker_name": booker_name,
+            "teams": teams,
+        })
+    return history
+
+
 def serialize_player(row: Enrollment) -> dict:
     return {
         "id": row.id,
@@ -202,10 +240,15 @@ def public_state() -> dict:
     for slot in ("sunday", "wednesday"):
         state = sync_slot(slot)
         players = players_payload(slot, state["week_key"], state["teams_ready"])
-        games.append({**state, **players})
+        games.append({
+            **state,
+            **players,
+            "history": history_for_slot(slot, state["week_key"]),
+        })
     return {
         "now": now_il().isoformat(),
         "is_admin": bool(session.get("is_admin")),
+        "persistent": PERSISTENT_DB,
         "games": games,
         "max_players": MAX_PLAYERS,
         "field_cost": FIELD_COST_NIS,

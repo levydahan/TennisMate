@@ -287,7 +287,35 @@ body {
 .team-card ul { margin: 6px 0 0; padding: 0 18px 0 0; }
 .team-card li { margin: 4px 0; font-weight: 700; }
 
-.field-game { margin-bottom: 18px; }
+.history {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed #bbf7d0;
+}
+
+.history h4 {
+  margin: 0 0 8px;
+  color: #14532d;
+}
+
+.history-card {
+  background: #f8fafc;
+  border-radius: 14px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.history-card p { margin: 6px 0 0; color: #365314; font-weight: 700; }
+.history-team { color: #1d4ed8 !important; }
+
+.persist-warn {
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-weight: 800;
+  margin-bottom: 16px;
+}
 .field-game:last-child { margin-bottom: 0; }
 
 .booker-label {
