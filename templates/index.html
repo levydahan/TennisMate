@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#14532d" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>טניסמייט · ניהול משחקים</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <div class="bg-lines" aria-hidden="true"></div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="ball" aria-hidden="true">🎾</span>
+      <div>
+        <h1>טניסמייט</h1>
+        <p>משחקים פעמיים בשבוע · 20:00</p>
+      </div>
+    </div>
+    <button id="adminBtn" class="ghost-btn" type="button">מנהל</button>
+  </header>
+
+  <main>
+    <section class="hero-card">
+      <p class="kicker">לוח המשחקים</p>
+      <h2>ראשון ורביעי ב־20:00</h2>
+      <p class="muted">עד 6 שחקנים בכל משחק. אחרי שהרשימה מתמלאת מצטרפים לרשימת המתנה.</p>
+      <ul class="rules">
+        <li>הרשמה לראשון: מיום חמישי 21:30</li>
+        <li>הרשמה לרביעי: מיום שני 21:30</li>
+        <li>ביום המשחק ב־19:59 הגרלת קבוצות אוטומטית · זוגות</li>
+        <li>רק המנהל יכול להסיר שחקנים</li>
+        <li>כל שבוע הרשימה מתאפסת בפתיחת ההרשמה</li>
+      </ul>
+    </section>
+
+    <div id="games" class="games"></div>
+
+    <section class="field-card" id="fieldSection">
+      <div class="field-head">
+        <h2>הזמנת מגרש</h2>
+        <span class="cost-pill">60 ₪ למשחק</span>
+      </div>
+      <p class="muted">הרשומים למשחק מופיעים כאן. עלות המגרש 60 ₪ מחולקת שווה בשווה. רק אחד מהם מזמין את המגרש.</p>
+      <div id="fieldLists"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <dialog id="adminDialog" class="dialog">
+    <form id="adminForm" method="dialog">
+      <h3>כניסת מנהל</h3>
+      <label for="adminPassword">סיסמה</label>
+      <input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" />
+      <div class="dialog-actions">
+        <button type="submit" class="primary-btn">כניסה</button>
+        <button type="button" class="ghost-btn" id="adminCancel">ביטול</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
