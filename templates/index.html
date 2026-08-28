@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=17" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=18" />
 </head>
 <body>
   <div class="page">
@@ -51,7 +51,13 @@
           <li>שעה לפני המשחק תזכורת, וב־21:01 תזכורת לשלם את חלקכם במגרש</li>
         </ul>
         <button id="notifyBtn" class="primary-btn notify-btn" type="button">הפעלת תזכורת תשלום</button>
-        <p class="muted notify-note">אחרי אישור התראות: שעה לפני המשחק, ואחרי המשחק ב־21:01 תזכורת תשלום עם הסכום. ב-Render חברו Cron ל־/api/cron/pay-reminder. בלי זה הדף צריך להישאר פתוח, או להתקין את האפליקציה.</p>
+        <p class="muted notify-note">אחרי אישור התראות: שעה לפני המשחק, ואחרי המשחק ב־21:01 תזכורת תשלום עם הסכום. בלי Cron הדף צריך להישאר פתוח, או להתקין את האפליקציה.</p>
+        <ol class="cron-steps">
+          <li>New + → Cron Job</li>
+          <li>URL: <code dir="ltr">https://tennismate.onrender.com/api/cron/pay-reminder</code></li>
+          <li>Schedule: <code dir="ltr">1 16-19 * * 0,3</code> (UTC)</li>
+        </ol>
+        <p class="muted notify-note">אותו <code dir="ltr">CRON_SECRET</code> בשירות הווב וב-Cron: כותרת <code dir="ltr">Authorization: Bearer …</code> או <code dir="ltr">?secret=</code>.</p>
       </div>
     </section>
     <script>

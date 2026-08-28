@@ -220,11 +220,44 @@ class JoinAndWaitlistTests(unittest.TestCase):
         try:
             res = self.client.get("/api/cron/pay-reminder")
             self.assertEqual(res.status_code, 401)
+            hour = self.client.get("/api/cron/hour-before")
+            self.assertEqual(hour.status_code, 401)
         finally:
             if old is None:
                 os.environ.pop("RENDER", None)
             else:
                 os.environ["RENDER"] = old
+
+    def test_cron_accepts_bearer_header_and_query_secret(self):
+        old_render = os.environ.get("RENDER")
+        old_secret = os.environ.get("CRON_SECRET")
+        os.environ["RENDER"] = "1"
+        os.environ["CRON_SECRET"] = "test-cron-secret"
+        try:
+            denied = self.client.get("/api/cron/pay-reminder")
+            self.assertEqual(denied.status_code, 401)
+            bearer = self.client.get(
+                "/api/cron/pay-reminder",
+                headers={"Authorization": "Bearer test-cron-secret"},
+            )
+            self.assertEqual(bearer.status_code, 200, bearer.get_json())
+            self.assertTrue(bearer.get_json()["ok"])
+            query = self.client.get("/api/cron/hour-before?secret=test-cron-secret")
+            self.assertEqual(query.status_code, 200, query.get_json())
+            header = self.client.get(
+                "/api/cron/pay-reminder",
+                headers={"X-Cron-Secret": "test-cron-secret"},
+            )
+            self.assertEqual(header.status_code, 200, header.get_json())
+        finally:
+            if old_render is None:
+                os.environ.pop("RENDER", None)
+            else:
+                os.environ["RENDER"] = old_render
+            if old_secret is None:
+                os.environ.pop("CRON_SECRET", None)
+            else:
+                os.environ["CRON_SECRET"] = old_secret
 
 
 if __name__ == "__main__":

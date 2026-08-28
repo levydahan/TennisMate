@@ -217,6 +217,22 @@ body {
 
 .rules li { margin: 6px 0; }
 
+.cron-steps {
+  margin: 0 0 12px;
+  padding: 0 18px 0 0;
+  color: #365314;
+  font-weight: 600;
+}
+
+.cron-steps li { margin: 6px 0; }
+
+.cron-steps code,
+.notify-note code {
+  font-size: 0.88em;
+  font-weight: 800;
+  word-break: break-all;
+}
+
 .game-head {
   display: flex;
   justify-content: space-between;

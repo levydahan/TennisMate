@@ -16,6 +16,47 @@ services:
         fromDatabase:
           name: tennismate-db
           property: connectionString
+      - key: CRON_SECRET
+        generateValue: true
+
+  # Render schedules are UTC (no Asia/Jerusalem). Dual hours cover IDT (+3) and IST (+2).
+  # 19:00 Israel ≈ 16:00 UTC in summer / 17:00 UTC in winter.
+  # 21:01 Israel ≈ 18:01 UTC in summer / 19:01 UTC in winter.
+  - type: cron
+    name: tennismate-hour-before
+    runtime: python
+    plan: starter
+    schedule: "0 16,17 * * 0,3"
+    buildCommand: "true"
+    startCommand: python cron_ping.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: CRON_SECRET
+        fromService:
+          name: tennismate
+          type: web
+          envVarKey: CRON_SECRET
+      - key: CRON_URL
+        value: https://tennismate.onrender.com/api/cron/hour-before
+
+  - type: cron
+    name: tennismate-pay-reminder
+    runtime: python
+    plan: starter
+    schedule: "1 18,19 * * 0,3"
+    buildCommand: "true"
+    startCommand: python cron_ping.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: CRON_SECRET
+        fromService:
+          name: tennismate
+          type: web
+          envVarKey: CRON_SECRET
+      - key: CRON_URL
+        value: https://tennismate.onrender.com/api/cron/pay-reminder
 
 databases:
   - name: tennismate-db

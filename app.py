@@ -514,12 +514,27 @@ def vapid_public_key() -> str | None:
     return public
 
 
+def _provided_cron_secret() -> str:
+    header = (request.headers.get("X-Cron-Secret") or "").strip()
+    if header:
+        return header
+    auth = (request.headers.get("Authorization") or "").strip()
+    if auth:
+        kind, _, rest = auth.partition(" ")
+        if kind.lower() == "bearer" and rest.strip():
+            return rest.strip()
+        return auth
+    return (request.args.get("secret") or "").strip()
+
+
 def _cron_authorized() -> bool:
     expected = os.environ.get("CRON_SECRET", "").strip()
-    provided = (request.headers.get("X-Cron-Secret") or request.args.get("secret") or "").strip()
-    if expected:
-        return hmac.compare_digest(provided, expected)
-    return not os.environ.get("RENDER")
+    provided = _provided_cron_secret()
+    if not expected:
+        return not os.environ.get("RENDER")
+    if not provided:
+        return False
+    return hmac.compare_digest(provided, expected)
 
 
 def dispatch_web_push(message: dict) -> int:
@@ -883,12 +898,16 @@ def push_subscribe():
     return jsonify({"ok": True, "message": "תזכורות התשלום הופעלו"})
 
 
+def _cron_force() -> bool:
+    body = request.get_json(silent=True) or {}
+    return request.args.get("force") == "1" or bool(body.get("force"))
+
+
 @app.route("/api/cron/pay-reminder", methods=["GET", "POST"])
 def cron_pay_reminder():
     if not _cron_authorized():
         return jsonify({"ok": False, "message": "אין הרשאה"}), 401
-    body = request.get_json(silent=True) or {}
-    force = request.args.get("force") == "1" or bool(body.get("force"))
+    force = _cron_force()
     pay = run_pay_reminders(force=force)
     hour = run_hour_before_reminders(force=False)
     sent = list(hour.get("sent") or []) + list(pay.get("sent") or [])
@@ -905,6 +924,24 @@ def cron_pay_reminder():
         result["message"] = "אין תזכורת כרגע"
     else:
         result["message"] = "אין שחקנים במגרש, אין מה לשלוח"
+    return jsonify(result)
+
+
+@app.route("/api/cron/hour-before", methods=["GET", "POST"])
+def cron_hour_before():
+    if not _cron_authorized():
+        return jsonify({"ok": False, "message": "אין הרשאה"}), 401
+    hour = run_hour_before_reminders(force=_cron_force())
+    result = {
+        "ok": True,
+        "sent": list(hour.get("sent") or []),
+        "skipped": list(hour.get("skipped") or []),
+        "hour_before": hour,
+    }
+    if result["sent"]:
+        result["message"] = result["sent"][0]["body"]
+    else:
+        result["message"] = "אין תזכורת כרגע"
     return jsonify(result)
 
 
