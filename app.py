@@ -23,7 +23,10 @@ database_url = os.environ.get("DATABASE_URL", "").strip()
 if database_url:
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
+    if database_url.startswith("postgresql") and "sslmode=" not in database_url:
+        database_url += ("&" if "?" in database_url else "?") + "sslmode=require"
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True}
 else:
     data_dir = os.environ.get("DATA_DIR", app.instance_path)
     os.makedirs(data_dir, exist_ok=True)
