@@ -25,10 +25,12 @@ def normalize_name(raw: str) -> tuple[str, str]:
 
 def canonical_player(raw: str) -> str | None:
     name, key = normalize_name(raw)
+    if not name:
+        return None
     alias = NAME_ALIASES.get(name) or NAME_ALIASES.get(key)
     if alias:
         name, key = normalize_name(alias)
     for player in FIXED_PLAYERS:
         if normalize_name(player)[1] == key:
             return player
-    return None
+    return name

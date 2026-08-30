@@ -734,6 +734,83 @@ body {
   font-weight: 800;
   margin-bottom: 16px;
 }
+
+.auth-card {
+  background: #fff;
+  border: 2px solid #bbf7d0;
+  border-radius: 20px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.auth-card h2 {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+  color: #14532d;
+}
+
+.auth-card label {
+  display: block;
+  font-weight: 800;
+  margin: 10px 0 4px;
+}
+
+.auth-card input {
+  width: 100%;
+  font: inherit;
+  font-size: 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 2px solid #bbf7d0;
+  box-sizing: border-box;
+}
+
+.auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.auth-hello { margin: 0 0 10px; font-weight: 700; }
+.reset-note {
+  margin: 12px 0 0;
+  font-weight: 800;
+  color: #14532d;
+  word-break: break-all;
+}
+
+.pay-warn {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 2px solid #f87171;
+  border-radius: 16px;
+  padding: 14px 16px;
+  font-weight: 800;
+  font-size: 1.05rem;
+  margin-bottom: 16px;
+}
+
+.pay-warn[hidden] { display: none !important; }
+
+.status.ended {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.join-row { margin: 12px 0 4px; }
+
+.me-paid-btn {
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.85rem;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #14532d;
+  color: #fef08a;
+  min-height: 40px;
+}
 .field-game:last-child { margin-bottom: 0; }
 
 .booker-label {

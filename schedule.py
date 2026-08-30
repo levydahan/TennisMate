@@ -11,6 +11,7 @@ DRAW_TIME = time(19, 59)
 HOUR_BEFORE_TIME = time(19, 0)
 REMATCH_TIME = time(21, 0)
 PAY_REMIND_TIME = time(21, 1)
+GAME_END_TIME = time(22, 1)
 ENROLL_OPEN_TIME = time(21, 30)
 MAX_PLAYERS = 6
 FIELD_COST_NIS = 60
@@ -83,6 +84,18 @@ def next_game_at(now: datetime | None = None) -> datetime:
             dt += timedelta(days=7)
         candidates.append(dt)
     return min(candidates)
+
+
+def banner_should_flash(now: datetime | None = None) -> bool:
+    """Flash only on match day until the game ends at 22:01."""
+    now = now_il() if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=TZ)
+    else:
+        now = now.astimezone(TZ)
+    if not is_match_day(now):
+        return False
+    return now < datetime.combine(now.date(), GAME_END_TIME, tzinfo=TZ)
 
 
 def format_dt_he(dt: datetime) -> str:
@@ -176,14 +189,14 @@ def draw_rematch(players: list, hour1_teams: list | None, rng: random.Random | N
 
 
 def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
-    """Return the visible game cycle for a slot.
+    """Return the visible upcoming game cycle for a slot.
 
-    Enrollment:
+    Enrollment windows (unchanged):
       Sunday game    — Thursday 21:30 until Sunday 20:00
       Wednesday game — Monday 21:30 until Wednesday 20:00
 
-    The roster stays visible after the game, and is cleared when the next
-    enrollment window opens (new week_key).
+    The displayed week rolls to the next occurrence at 22:01 Israel time.
+    The just-ended week is exposed as prev_week_key.
     """
     if slot_key not in SLOTS:
         raise ValueError(f"unknown slot: {slot_key}")
@@ -199,33 +212,27 @@ def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
 
     days_ahead = (game_weekday - now.weekday()) % 7
     this_week_date = now.date() + timedelta(days=days_ahead)
-    this_week_dt = datetime.combine(this_week_date, GAME_TIME, tzinfo=TZ)
+    this_week_end = datetime.combine(this_week_date, GAME_END_TIME, tzinfo=TZ)
 
-    if now >= this_week_dt:
-        next_date = this_week_date + timedelta(days=7)
-        next_dt = this_week_dt + timedelta(days=7)
+    if now >= this_week_end:
+        week_date = this_week_date + timedelta(days=7)
+        prev_week_date = this_week_date
     else:
-        next_date = this_week_date
-        next_dt = this_week_dt
+        week_date = this_week_date
+        prev_week_date = this_week_date - timedelta(days=7)
 
-    next_open = datetime.combine(
-        next_date - timedelta(days=spec["open_days_before"]),
+    game_dt = datetime.combine(week_date, GAME_TIME, tzinfo=TZ)
+    game_end_dt = datetime.combine(week_date, GAME_END_TIME, tzinfo=TZ)
+    open_dt = datetime.combine(
+        week_date - timedelta(days=spec["open_days_before"]),
         ENROLL_OPEN_TIME,
         tzinfo=TZ,
     )
+    prev_end_dt = datetime.combine(prev_week_date, GAME_END_TIME, tzinfo=TZ)
 
-    if now >= next_open:
-        week_date = next_date
-        game_dt = next_dt
-        open_dt = next_open
-        is_open = now < next_dt
-        is_past = False
-    else:
-        week_date = next_date - timedelta(days=7)
-        game_dt = next_dt - timedelta(days=7)
-        open_dt = next_open
-        is_open = False
-        is_past = now >= game_dt
+    is_open = open_dt <= now < game_dt
+    is_ended = now >= game_end_dt
+    is_past = now >= game_dt
 
     draw_dt = datetime.combine(week_date, DRAW_TIME, tzinfo=TZ)
     rematch_dt = datetime.combine(week_date, REMATCH_TIME, tzinfo=TZ)
@@ -235,9 +242,12 @@ def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
     if is_open:
         status_he = "ההרשמה פתוחה"
         status_detail = f"פתוחה עד {format_dt_he(game_dt)}"
-    elif is_past:
+    elif is_ended:
         status_he = "המשחק הסתיים"
-        status_detail = f"הרשימה נשמרת · הרשמה חדשה ב־{format_dt_he(open_dt)}"
+        status_detail = f"הרשמה חדשה ב־{format_dt_he(open_dt)}"
+    elif is_past:
+        status_he = "המשחק התחיל"
+        status_detail = f"מסתיים ב־{format_dt_he(game_end_dt)}"
     else:
         status_he = "ההרשמה סגורה"
         status_detail = f"תיפתח ב־{format_dt_he(open_dt)}"
@@ -246,16 +256,20 @@ def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
         "slot": slot_key,
         "label_he": spec["label_he"],
         "week_key": week_date.isoformat(),
+        "prev_week_key": prev_week_date.isoformat() if now >= prev_end_dt else None,
         "game_at": game_dt.isoformat(),
+        "game_end_at": game_end_dt.isoformat(),
         "open_at": open_dt.isoformat(),
         "draw_at": draw_dt.isoformat(),
         "rematch_at": rematch_dt.isoformat(),
         "game_at_he": format_dt_he(game_dt),
+        "game_end_at_he": format_dt_he(game_end_dt),
         "open_at_he": format_dt_he(open_dt),
         "draw_at_he": format_dt_he(draw_dt),
         "rematch_at_he": format_dt_he(rematch_dt),
         "is_open": is_open,
         "is_past": is_past,
+        "is_ended": is_ended,
         "teams_ready": teams_ready,
         "rematch_ready": rematch_ready,
         "status_he": status_he,

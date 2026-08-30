@@ -1,13 +1,16 @@
 import os
 import hmac
 import json
-from datetime import date, datetime, timezone
+import re
+import secrets
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
 from flask import Flask, jsonify, render_template, request, send_from_directory, session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from players import FIXED_PLAYERS, canonical_player, normalize_name
 from reminders import (
@@ -21,9 +24,12 @@ from reminders import (
 from schedule import (
     DAYS_HE,
     FIELD_COST_NIS,
+    GAME_END_TIME,
     GAME_TIME,
     MAX_PLAYERS,
+    SLOTS,
     TZ,
+    banner_should_flash,
     draw_teams,
     draw_rematch,
     format_dt_he,
@@ -79,8 +85,11 @@ PERSISTENT_DB = bool(database_url)
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=60)
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "0508716669")
+PAY_WARNING = "הלו הלו לא שילמת למשחקת תשלם עכשיו"
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def bit_pay_phone() -> str:
@@ -100,11 +109,22 @@ class Enrollment(db.Model):
     name_key = db.Column(db.String(80), nullable=False)
     is_waitlist = db.Column(db.Boolean, nullable=False, default=False)
     paid = db.Column(db.Boolean, nullable=False, default=False)
+    user_id = db.Column(db.Integer, nullable=True, index=True)
     joined_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         db.UniqueConstraint("slot", "week_key", "name_key", name="uq_slot_week_name"),
     )
+
+
+class User(db.Model):
+    __tablename__ = "users"
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), nullable=False, unique=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    name = db.Column(db.String(80), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 class GameSettings(db.Model):
@@ -188,6 +208,9 @@ def _ensure_schema():
             default_sql = "FALSE" if db.engine.dialect.name == "postgresql" else "0"
             with db.engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE enrollments ADD COLUMN paid BOOLEAN DEFAULT {default_sql}"))
+        if "user_id" not in columns:
+            with db.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE enrollments ADD COLUMN user_id INTEGER"))
     if "game_settings" in inspector.get_table_names():
         columns = {col["name"] for col in inspector.get_columns("game_settings")}
         with db.engine.begin() as conn:
@@ -226,6 +249,83 @@ def admin_required(fn):
         return fn(*args, **kwargs)
 
     return wrapper
+
+
+def normalize_email(raw: str) -> str:
+    return (raw or "").strip().lower()
+
+
+def current_user() -> User | None:
+    uid = session.get("user_id")
+    if not uid:
+        return None
+    return db.session.get(User, uid)
+
+
+def serialize_user(user: User | None) -> dict | None:
+    if not user:
+        return None
+    return {"id": user.id, "email": user.email, "name": user.name}
+
+
+def login_user(user: User) -> None:
+    session["user_id"] = user.id
+    session.permanent = True
+
+
+def name_taken(name: str, exclude_id: int | None = None) -> bool:
+    _, name_key = normalize_name(name)
+    for row in User.query.all():
+        if exclude_id is not None and row.id == exclude_id:
+            continue
+        if normalize_name(row.name)[1] == name_key:
+            return True
+    return False
+
+
+def unpaid_debt(user: User | None) -> dict | None:
+    """Ended roster game that the player never marked paid."""
+    if not user:
+        return None
+    now = now_il()
+    rows = Enrollment.query.filter_by(is_waitlist=False, paid=False, user_id=user.id).all()
+    if not rows:
+        _, name_key = normalize_name(user.name)
+        rows = Enrollment.query.filter(
+            Enrollment.is_waitlist.is_(False),
+            Enrollment.paid.is_(False),
+            Enrollment.user_id.is_(None),
+            Enrollment.name_key == name_key,
+        ).all()
+    debts = []
+    for row in rows:
+        try:
+            game_date = date.fromisoformat(row.week_key)
+        except ValueError:
+            continue
+        end_dt = datetime.combine(game_date, GAME_END_TIME, tzinfo=TZ)
+        if now < end_dt:
+            continue
+        n = Enrollment.query.filter_by(slot=row.slot, week_key=row.week_key, is_waitlist=False).count()
+        share = round(FIELD_COST_NIS / n, 2) if n else None
+        debts.append({
+            "enrollment_id": row.id,
+            "slot": row.slot,
+            "week_key": row.week_key,
+            "label_he": SLOTS.get(row.slot, {}).get("label_he", row.slot),
+            "game_at_he": week_label(row.week_key),
+            "share": share,
+        })
+    if not debts:
+        return None
+    debts.sort(key=lambda item: item["week_key"])
+    return debts[0]
+
+
+def owns_enrollment(row: Enrollment, user: User) -> bool:
+    if row.user_id is not None:
+        return row.user_id == user.id
+    return row.name_key == normalize_name(user.name)[1]
 
 
 def sync_slot(slot: str) -> dict:
@@ -290,14 +390,16 @@ def ensure_teams(
     return hour1, hour2
 
 
-def players_payload(slot: str, week_key: str, teams_ready: bool, rematch_ready: bool = False) -> dict:
+def players_payload(
+    slot: str, week_key: str, teams_ready: bool, rematch_ready: bool = False, me: User | None = None
+) -> dict:
     rows = (
         Enrollment.query.filter_by(slot=slot, week_key=week_key)
         .order_by(Enrollment.is_waitlist.asc(), Enrollment.joined_at.asc(), Enrollment.id.asc())
         .all()
     )
-    roster = [serialize_player(row) for row in rows if not row.is_waitlist]
-    waiting = [serialize_player(row) for row in rows if row.is_waitlist]
+    roster = [serialize_player(row, me) for row in rows if not row.is_waitlist]
+    waiting = [serialize_player(row, me) for row in rows if row.is_waitlist]
     settings = get_settings(slot, week_key)
     roster_ids = {player["id"] for player in roster}
     if settings.booker_id and settings.booker_id not in roster_ids:
@@ -342,9 +444,24 @@ def squad_for(roster: list[dict], waiting: list[dict]) -> list[dict]:
     return squad
 
 
+def known_stat_names() -> list[str]:
+    names = list(FIXED_PLAYERS)
+    seen = {normalize_name(name)[1] for name in names}
+    extras = [row[0] for row in db.session.query(Enrollment.name).distinct().all()]
+    extras += [row[0] for row in db.session.query(User.name).distinct().all()]
+    for raw in extras:
+        canon = canonical_player(raw) or raw
+        key = normalize_name(canon)[1]
+        if key and key not in seen:
+            seen.add(key)
+            names.append(canon)
+    return names
+
+
 def attendance_stats() -> dict:
-    """Arrival and court-booker history for finished games, per fixed player."""
+    """Arrival and court-booker history for finished games."""
     spark_max = 16
+    names = known_stat_names()
     tallies = {
         name: {
             "name": name,
@@ -354,7 +471,7 @@ def attendance_stats() -> dict:
             "arrival_history": [],
             "booker_history": [],
         }
-        for name in FIXED_PLAYERS
+        for name in names
     }
     finished = []
     for slot in ("sunday", "wednesday"):
@@ -390,7 +507,7 @@ def attendance_stats() -> dict:
 
     finished.sort(key=lambda item: (item[0], item[1]))
     for _week_key, _slot, arrived_names, booker_name in finished:
-        for name in FIXED_PLAYERS:
+        for name in names:
             row = tallies[name]
             arrived = name in arrived_names
             row["arrived" if arrived else "missed"] += 1
@@ -401,7 +518,7 @@ def attendance_stats() -> dict:
             row["booker_history"].append(1 if booked else 0)
 
     players = []
-    for name in FIXED_PLAYERS:
+    for name in names:
         row = tallies[name]
         total = row["arrived"] + row["missed"]
         row["not_booked"] = max(total - row["booked"], 0)
@@ -412,12 +529,15 @@ def attendance_stats() -> dict:
     return {"games": len(finished), "players": players}
 
 
-def history_for_slot(slot: str, current_week_key: str) -> list[dict]:
+def history_for_slot(slot: str, current_week_key: str, exclude: str | None = None) -> list[dict]:
+    skip = {current_week_key}
+    if exclude:
+        skip.add(exclude)
     week_keys = [
         row[0]
         for row in (
             db.session.query(Enrollment.week_key)
-            .filter(Enrollment.slot == slot, Enrollment.week_key != current_week_key)
+            .filter(Enrollment.slot == slot, ~Enrollment.week_key.in_(skip))
             .distinct()
             .order_by(Enrollment.week_key.desc())
             .limit(12)
@@ -462,13 +582,50 @@ def history_for_slot(slot: str, current_week_key: str) -> list[dict]:
     return history
 
 
-def serialize_player(row: Enrollment) -> dict:
+def serialize_player(row: Enrollment, me: User | None = None) -> dict:
+    is_me = bool(me and owns_enrollment(row, me))
     return {
         "id": row.id,
         "name": canonical_player(row.name) or row.name,
         "is_waitlist": row.is_waitlist,
         "paid": row.paid,
+        "user_id": row.user_id,
+        "is_me": is_me,
         "joined_at": row.joined_at.isoformat() if row.joined_at else None,
+    }
+
+
+def ended_game_payload(slot: str, week_key: str, me: User | None = None) -> dict:
+    spec = SLOTS[slot]
+    game_dt = datetime.combine(date.fromisoformat(week_key), GAME_TIME, tzinfo=TZ)
+    game_end_dt = datetime.combine(date.fromisoformat(week_key), GAME_END_TIME, tzinfo=TZ)
+    players = players_payload(slot, week_key, True, True, me)
+    return {
+        "slot": slot,
+        "label_he": spec["label_he"],
+        "week_key": week_key,
+        "prev_week_key": None,
+        "game_at": game_dt.isoformat(),
+        "game_end_at": game_end_dt.isoformat(),
+        "open_at": None,
+        "draw_at": None,
+        "rematch_at": None,
+        "game_at_he": format_dt_he(game_dt),
+        "game_end_at_he": format_dt_he(game_end_dt),
+        "open_at_he": None,
+        "draw_at_he": None,
+        "rematch_at_he": None,
+        "is_open": False,
+        "is_past": True,
+        "is_ended": True,
+        "teams_ready": True,
+        "rematch_ready": True,
+        "status_he": "המשחק הסתיים",
+        "status_detail": "הרשימה נשמרת",
+        "max_players": MAX_PLAYERS,
+        "field_cost": FIELD_COST_NIS,
+        **players,
+        "history": [],
     }
 
 
@@ -633,15 +790,25 @@ def run_hour_before_reminders(force: bool = False) -> dict:
 
 
 def public_state() -> dict:
-    games = []
+    me = current_user()
+    debt = unpaid_debt(me)
+    upcoming_games = []
+    ended_games = []
     for slot in ("sunday", "wednesday"):
         state = sync_slot(slot)
-        players = players_payload(slot, state["week_key"], state["teams_ready"], state.get("rematch_ready", False))
-        games.append({
+        players = players_payload(
+            slot, state["week_key"], state["teams_ready"], state.get("rematch_ready", False), me
+        )
+        upcoming_games.append({
             **state,
             **players,
-            "history": history_for_slot(slot, state["week_key"]),
+            "history": history_for_slot(slot, state["week_key"], exclude=state.get("prev_week_key")),
         })
+        prev = state.get("prev_week_key")
+        if prev:
+            ended_games.append(ended_game_payload(slot, prev, me))
+    upcoming_games.sort(key=lambda game: game["game_at"])
+    ended_games.sort(key=lambda game: game["game_at"], reverse=True)
     nxt = next_pay_reminder_at()
     hour_before = next_hour_before_at()
     match_at = todays_match_game_at()
@@ -649,8 +816,11 @@ def public_state() -> dict:
     return {
         "now": now_il().isoformat(),
         "is_admin": bool(session.get("is_admin")),
+        "user": serialize_user(me),
+        "unpaid": debt,
+        "pay_warning": PAY_WARNING if debt else None,
         "persistent": PERSISTENT_DB,
-        "games": games,
+        "games": upcoming_games + ended_games,
         "players": FIXED_PLAYERS,
         "stats": attendance_stats(),
         "vapid_public_key": vapid_public_key(),
@@ -659,6 +829,7 @@ def public_state() -> dict:
         "hour_before_at": hour_before.isoformat(),
         "hour_before_at_he": format_dt_he(hour_before),
         "is_match_day": is_match_day(),
+        "banner_flash": banner_should_flash(),
         "match_game_at": match_at.isoformat() if match_at else None,
         "next_game_at": upcoming.isoformat(),
         "next_game_at_he": format_dt_he(upcoming),
@@ -684,17 +855,131 @@ def health():
     return jsonify({"ok": True})
 
 
+@app.post("/api/register")
+def api_register():
+    data = request.get_json(silent=True) or {}
+    email = normalize_email(data.get("email"))
+    password = str(data.get("password") or "")
+    name = canonical_player(data.get("name") or "") or " ".join(str(data.get("name") or "").split())
+    if not EMAIL_RE.match(email):
+        return jsonify({"ok": False, "message": "אימייל לא תקין"}), 400
+    if len(password) < 6:
+        return jsonify({"ok": False, "message": "הסיסמה חייבת לפחות 6 תווים"}), 400
+    if not name:
+        return jsonify({"ok": False, "message": "יש להזין שם"}), 400
+    if name_taken(name):
+        return jsonify({"ok": False, "message": "השם כבר תפוס"}), 400
+    if User.query.filter_by(email=email).first():
+        return jsonify({"ok": False, "message": "האימייל כבר רשום"}), 400
+    user = User(email=email, password_hash=generate_password_hash(password), name=name)
+    db.session.add(user)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"ok": False, "message": "האימייל כבר רשום"}), 400
+    login_user(user)
+    payload = public_state()
+    payload.update({"ok": True, "message": f"נרשמת · שלום {user.name}"})
+    return jsonify(payload)
+
+
+@app.post("/api/login")
+def api_login():
+    data = request.get_json(silent=True) or {}
+    email = normalize_email(data.get("email"))
+    password = str(data.get("password") or "")
+    user = User.query.filter_by(email=email).first()
+    if not user or not check_password_hash(user.password_hash, password):
+        return jsonify({"ok": False, "message": "אימייל או סיסמה שגויים"}), 401
+    login_user(user)
+    payload = public_state()
+    payload.update({"ok": True, "message": f"שלום {user.name}"})
+    return jsonify(payload)
+
+
+@app.post("/api/logout")
+def api_logout():
+    session.pop("user_id", None)
+    payload = public_state()
+    payload.update({"ok": True, "message": "התנתקת"})
+    return jsonify(payload)
+
+
+@app.post("/api/reset-password")
+def api_reset_password():
+    data = request.get_json(silent=True) or {}
+    email = normalize_email(data.get("email"))
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"ok": False, "message": "האימייל לא נמצא"}), 404
+    new_password = str(data.get("password") or data.get("new_password") or "").strip()
+    generated = False
+    if not new_password:
+        new_password = "tm-" + secrets.token_hex(4)
+        generated = True
+    elif len(new_password) < 6:
+        return jsonify({"ok": False, "message": "הסיסמה החדשה קצרה מדי"}), 400
+    user.password_hash = generate_password_hash(new_password)
+    db.session.commit()
+    login_user(user)
+    payload = public_state()
+    payload.update({
+        "ok": True,
+        "message": "הסיסמה אופסה. שמרו אותה — אין מייל אישור.",
+        "new_password": new_password,
+        "generated": generated,
+    })
+    return jsonify(payload)
+
+
+@app.post("/api/me/paid")
+def api_me_paid():
+    user = current_user()
+    if not user:
+        return jsonify({"ok": False, "message": "יש להתחבר"}), 401
+    data = request.get_json(silent=True) or {}
+    row = db.session.get(Enrollment, data.get("id"))
+    if not row or not owns_enrollment(row, user):
+        return jsonify({"ok": False, "message": "אפשר לסמן תשלום רק לעצמך"}), 403
+    if row.is_waitlist:
+        return jsonify({"ok": False, "message": "רשימת המתנה לא משלמת"}), 400
+    row.paid = True
+    if row.user_id is None:
+        row.user_id = user.id
+    db.session.commit()
+    payload = public_state()
+    payload.update({"ok": True, "message": "סומן כשולם"})
+    return jsonify(payload)
+
+
 @app.post("/api/join")
 def api_join():
     data = request.get_json(silent=True) or {}
     slot = (data.get("slot") or "").strip()
-    name = canonical_player(data.get("name") or "")
     is_admin = bool(session.get("is_admin"))
+    user = current_user()
 
     if slot not in ("sunday", "wednesday"):
         return jsonify({"ok": False, "message": "משחק לא תקין"}), 400
-    if not name:
-        return jsonify({"ok": False, "message": "יש לבחור שם מרשימת השחקנים"}), 400
+
+    if user:
+        name = user.name
+        user_id = user.id
+        if not is_admin:
+            debt = unpaid_debt(user)
+            if debt:
+                payload = public_state()
+                payload.update({"ok": False, "message": PAY_WARNING, "pay_warning": PAY_WARNING})
+                return jsonify(payload), 400
+    elif is_admin:
+        name = canonical_player(data.get("name") or "") or " ".join(str(data.get("name") or "").split())
+        user_id = None
+        if not name:
+            return jsonify({"ok": False, "message": "יש להזין שם"}), 400
+    else:
+        return jsonify({"ok": False, "message": "יש להתחבר כדי להירשם"}), 401
+
     _, name_key = normalize_name(name)
 
     state = sync_slot(slot)
@@ -705,6 +990,9 @@ def api_join():
         slot=slot, week_key=state["week_key"], name_key=name_key
     ).first()
     if existing:
+        if existing.user_id is None and user_id:
+            existing.user_id = user_id
+            db.session.commit()
         if existing.is_waitlist:
             return jsonify({"ok": False, "message": "אתה כבר ברשימת ההמתנה"}), 400
         return jsonify({"ok": False, "message": "אתה כבר רשום למשחק"}), 400
@@ -719,6 +1007,7 @@ def api_join():
         name=name,
         name_key=name_key,
         is_waitlist=waitlisted,
+        user_id=user_id,
     )
     db.session.add(row)
     try:

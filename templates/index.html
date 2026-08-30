@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=18" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=19" />
 </head>
 <body>
   <div class="page">
@@ -32,6 +32,33 @@
   </header>
 
   <main>
+    <section class="auth-card" id="authCard">
+      <div id="authLoggedOut">
+        <h2>כניסה לשחקנים</h2>
+        <p class="muted">אימייל וסיסמה. איפוס סיסמה מיידי בלי מייל אישור.</p>
+        <form id="authForm">
+          <label for="authEmail">אימייל</label>
+          <input id="authEmail" type="email" autocomplete="username" required />
+          <label for="authPassword">סיסמה</label>
+          <input id="authPassword" type="password" autocomplete="current-password" />
+          <div id="authNameBlock" hidden>
+            <label for="authName">שם לתצוגה</label>
+            <input id="authName" type="text" autocomplete="nickname" />
+          </div>
+          <div class="auth-actions">
+            <button type="submit" class="primary-btn" id="authLoginBtn">כניסה</button>
+            <button type="button" class="ghost-btn" id="authRegisterBtn">הרשמה</button>
+            <button type="button" class="ghost-btn" id="authResetBtn">איפוס סיסמה</button>
+          </div>
+        </form>
+        <p id="authResetNote" class="reset-note" hidden></p>
+      </div>
+      <div id="authLoggedIn" hidden>
+        <p class="auth-hello">שלום <strong id="authHello"></strong></p>
+        <button type="button" class="ghost-btn" id="logoutBtn">יציאה</button>
+      </div>
+    </section>
+    <div id="payWarn" class="pay-warn" hidden></div>
     <section class="hero-card collapsed" id="heroCard">
       <button type="button" class="hero-toggle" id="heroToggle" aria-expanded="false" aria-controls="heroBody">
         <span class="hero-toggle-copy">
@@ -41,7 +68,7 @@
         <span class="hero-toggle-action">הרחב</span>
       </button>
       <div id="heroBody" class="hero-body">
-        <p class="muted">סמנו את השם שלכם כדי להצטרף. הרשימה קבועה — אי אפשר להוסיף או לשנות שמות. עד 6 שחקנים במגרש, אחר כך ממתינים.</p>
+        <p class="muted">התחברו עם אימייל וסיסמה, ואז לחצו «אני מגיע» למשחק הפתוח. עד 6 שחקנים במגרש, אחר כך ממתינים. אחרי ביט — סמנו ששילמתם.</p>
         <ul class="rules">
           <li>הרשמה לראשון: מיום חמישי 21:30</li>
           <li>הרשמה לרביעי: מיום שני 21:30</li>
@@ -82,7 +109,7 @@
         <h2>הזמנת מגרש</h2>
         <span class="cost-pill">60 ₪ למשחק</span>
       </div>
-      <p class="muted">הרשומים למשחק מופיעים כאן. עלות המגרש 60 ₪ מחולקת שווה בשווה. רק אחד מהם מזמין את המגרש. שלם בביט פותח את האפליקציה — שלמו את החלק למזמין.</p>
+      <p class="muted">עלות המגרש 60 ₪ מחולקת שווה בשווה. רק המזמין נבחר מהרשימה. כפתור ביט וסימון שולם מופיעים רק אצלכם.</p>
       <div id="fieldLists"></div>
     </section>
 
@@ -129,6 +156,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=17"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=19"></script>
 </body>
 </html>

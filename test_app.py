@@ -34,6 +34,12 @@ class JoinAndWaitlistTests(unittest.TestCase):
         res = self.client.post("/api/admin/login", json={"password": "0508716669"})
         self.assertTrue(res.get_json()["ok"])
 
+    def _game(self, data, slot="sunday", ended=False):
+        for game in data["games"]:
+            if game["slot"] == slot and bool(game.get("is_ended")) == ended:
+                return game
+        return None
+
     def test_seventh_player_goes_to_waitlist_and_promotes(self):
         self._login_admin()
         for name in FIXED_PLAYERS[:6]:
@@ -47,30 +53,121 @@ class JoinAndWaitlistTests(unittest.TestCase):
         data = res.get_json()
         self.assertTrue(data["ok"])
         self.assertTrue(data["waitlisted"])
-        self.assertEqual(len(data["games"][0]["waiting"]), 1)
+        sunday = self._game(data, "sunday")
+        self.assertEqual(len(sunday["waiting"]), 1)
 
-        first_id = data["games"][0]["roster"][0]["id"]
+        first_id = sunday["roster"][0]["id"]
         res = self.client.post("/api/admin/remove", json={"id": first_id})
         data = res.get_json()
         self.assertTrue(data["ok"])
-        names = [p["name"] for p in data["games"][0]["roster"]]
+        sunday = self._game(data, "sunday")
+        names = [p["name"] for p in sunday["roster"]]
         self.assertIn(waiting_name, names)
-        self.assertEqual(data["games"][0]["waiting"], [])
-        self.assertEqual(data["games"][0]["share"], 10)
+        self.assertEqual(sunday["waiting"], [])
+        self.assertEqual(sunday["share"], 10)
 
-    def test_unknown_name_cannot_join(self):
-        res = self.client.post("/api/join", json={"slot": "sunday", "name": "דני"})
-        self.assertEqual(res.status_code, 400)
+    def test_join_requires_login(self):
+        res = self.client.post("/api/join", json={"slot": "sunday"})
+        self.assertEqual(res.status_code, 401)
         self.assertFalse(res.get_json()["ok"])
+
+    def test_register_login_and_reset_password(self):
+        created = self.client.post("/api/register", json={
+            "email": "levi@example.com",
+            "password": "secret1",
+            "name": "לוי",
+        })
+        data = created.get_json()
+        self.assertTrue(data["ok"], data)
+        self.assertEqual(data["user"]["email"], "levi@example.com")
+        self.client.post("/api/logout", json={})
+        denied = self.client.post("/api/login", json={
+            "email": "levi@example.com",
+            "password": "wrong-password",
+        })
+        self.assertEqual(denied.status_code, 401)
+        reset = self.client.post("/api/reset-password", json={"email": "levi@example.com"})
+        reset_data = reset.get_json()
+        self.assertTrue(reset_data["ok"], reset_data)
+        self.assertTrue(reset_data["new_password"])
+        self.client.post("/api/logout", json={})
+        login = self.client.post("/api/login", json={
+            "email": "levi@example.com",
+            "password": reset_data["new_password"],
+        })
+        self.assertTrue(login.get_json()["ok"])
+
+    def test_unpaid_blocks_next_enroll_and_shows_warning(self):
+        created = self.client.post("/api/register", json={
+            "email": "levi@example.com",
+            "password": "secret1",
+            "name": "לוי",
+        })
+        user_id = created.get_json()["user"]["id"]
+        with app.app_context():
+            db.session.add(Enrollment(
+                slot="sunday",
+                week_key="2020-01-05",
+                name="לוי",
+                name_key="לוי",
+                user_id=user_id,
+                is_waitlist=False,
+                paid=False,
+            ))
+            db.session.commit()
+            enrollment_id = Enrollment.query.filter_by(week_key="2020-01-05").first().id
+        state = self.client.get("/api/state").get_json()
+        self.assertEqual(state["pay_warning"], "הלו הלו לא שילמת למשחקת תשלם עכשיו")
+        self.assertEqual(state["unpaid"]["enrollment_id"], enrollment_id)
+        blocked = self.client.post("/api/join", json={"slot": "sunday"})
+        self.assertEqual(blocked.status_code, 400)
+        self.assertEqual(blocked.get_json()["message"], "הלו הלו לא שילמת למשחקת תשלם עכשיו")
+        paid = self.client.post("/api/me/paid", json={"id": enrollment_id})
+        self.assertTrue(paid.get_json()["ok"])
+        self.assertIsNone(paid.get_json()["unpaid"])
+        self.assertIsNone(paid.get_json()["pay_warning"])
+
+    def test_ended_game_card_goes_to_bottom(self):
+        from schedule import get_slot_state
+        sunday = get_slot_state("sunday")
+        prev = sunday.get("prev_week_key")
+        self.assertTrue(prev)
+        with app.app_context():
+            db.session.add(Enrollment(
+                slot="sunday",
+                week_key=prev,
+                name="לוי",
+                name_key="לוי",
+                is_waitlist=False,
+            ))
+            db.session.commit()
+        games = self.client.get("/api/state").get_json()["games"]
+        ended = [game for game in games if game.get("is_ended")]
+        upcoming = [game for game in games if not game.get("is_ended")]
+        self.assertTrue(ended)
+        self.assertTrue(upcoming)
+        self.assertLess(
+            max(i for i, game in enumerate(games) if not game.get("is_ended")),
+            min(i for i, game in enumerate(games) if game.get("is_ended")),
+        )
+        self.assertEqual(ended[0]["status_he"], "המשחק הסתיים")
+        self.assertIn("לוי", [p["name"] for p in ended[0]["roster"]])
+
+    def test_state_exposes_banner_flash(self):
+        from schedule import banner_should_flash
+        data = self.client.get("/api/state").get_json()
+        self.assertIn("banner_flash", data)
+        self.assertEqual(data["banner_flash"], banner_should_flash())
+        self.assertIn("next_game_at_he", data)
 
     def test_public_cannot_remove_players(self):
         self._login_admin()
         self.client.post("/api/join", json={"slot": "sunday", "name": "לוי"})
-        player_id = self.client.get("/api/state").get_json()["games"][0]["roster"][0]["id"]
+        player_id = self._game(self.client.get("/api/state").get_json(), "sunday")["roster"][0]["id"]
         self.client.post("/api/admin/logout", json={})
         res = self.client.post("/api/admin/remove", json={"id": player_id})
         self.assertEqual(res.status_code, 401)
-        names = [p["name"] for p in self.client.get("/api/state").get_json()["games"][0]["roster"]]
+        names = [p["name"] for p in self._game(self.client.get("/api/state").get_json(), "sunday")["roster"]]
         self.assertEqual(names, ["לוי"])
 
     def test_field_cost_splits(self):
@@ -78,23 +175,24 @@ class JoinAndWaitlistTests(unittest.TestCase):
         self.client.post("/api/join", json={"slot": "sunday", "name": "לוי"})
         self.client.post("/api/join", json={"slot": "sunday", "name": "שירן"})
         data = self.client.get("/api/state").get_json()
-        self.assertEqual(data["games"][0]["share"], 30)
-        self.assertEqual(data["games"][0]["field_cost"], 60)
+        sunday = self._game(data, "sunday")
+        self.assertEqual(sunday["share"], 30)
+        self.assertEqual(sunday["field_cost"], 60)
 
     def test_choose_booker_from_roster(self):
         self._login_admin()
         self.client.post("/api/join", json={"slot": "sunday", "name": "לוי"})
         self.client.post("/api/join", json={"slot": "sunday", "name": "שירן"})
         self.client.post("/api/admin/logout", json={})
-        roster = self.client.get("/api/state").get_json()["games"][0]["roster"]
+        roster = self._game(self.client.get("/api/state").get_json(), "sunday")["roster"]
         res = self.client.post("/api/booker", json={"slot": "sunday", "player_id": roster[1]["id"]})
         data = res.get_json()
         self.assertTrue(data["ok"])
-        self.assertEqual(data["games"][0]["booker_name"], "שירן")
+        self.assertEqual(self._game(data, "sunday")["booker_name"], "שירן")
 
     def test_keeps_previous_week_enrollments(self):
         self._login_admin()
-        current = self.client.get("/api/state").get_json()["games"][0]["week_key"]
+        current = self._game(self.client.get("/api/state").get_json(), "sunday")["week_key"]
         from datetime import date, timedelta
         prev = (date.fromisoformat(current) - timedelta(days=7)).isoformat()
         with app.app_context():
@@ -114,8 +212,12 @@ class JoinAndWaitlistTests(unittest.TestCase):
             ))
             db.session.commit()
         data = self.client.get("/api/state").get_json()
-        self.assertNotIn("לוי", [p["name"] for p in data["games"][0]["roster"]])
-        history_names = [p["name"] for h in data["games"][0]["history"] for p in h["roster"]]
+        sunday = self._game(data, "sunday")
+        self.assertNotIn("לוי", [p["name"] for p in sunday["roster"]])
+        ended = self._game(data, "sunday", ended=True)
+        history_names = [p["name"] for h in sunday["history"] for p in h["roster"]]
+        if ended:
+            history_names += [p["name"] for p in ended["roster"]]
         self.assertIn("לוי", history_names)
         stats = {p["name"]: p for p in data["stats"]["players"]}
         self.assertGreaterEqual(data["stats"]["games"], 1)
@@ -130,7 +232,7 @@ class JoinAndWaitlistTests(unittest.TestCase):
 
     def test_squad_lists_fixed_names_and_alias(self):
         self._login_admin()
-        current = self.client.get("/api/state").get_json()["games"][0]["week_key"]
+        current = self._game(self.client.get("/api/state").get_json(), "sunday")["week_key"]
         with app.app_context():
             db.session.add(Enrollment(
                 slot="sunday",
@@ -140,7 +242,7 @@ class JoinAndWaitlistTests(unittest.TestCase):
                 is_waitlist=False,
             ))
             db.session.commit()
-        sunday = self.client.get("/api/state").get_json()["games"][0]
+        sunday = self._game(self.client.get("/api/state").get_json(), "sunday")
         self.assertEqual(len(sunday["squad"]), 9)
         idan = next(p for p in sunday["squad"] if p["name"] == "עידן")
         self.assertEqual(idan["status"], "arrived")

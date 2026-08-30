@@ -3,7 +3,7 @@ from datetime import datetime
 
 import random
 
-from schedule import TZ, draw_rematch, draw_teams, forbidden_pairs, get_slot_state
+from schedule import TZ, banner_should_flash, draw_rematch, draw_teams, forbidden_pairs, get_slot_state
 
 
 class SundayEnrollmentTests(unittest.TestCase):
@@ -11,7 +11,7 @@ class SundayEnrollmentTests(unittest.TestCase):
         now = datetime(2026, 8, 27, 21, 29, tzinfo=TZ)
         state = get_slot_state("sunday", now)
         self.assertFalse(state["is_open"])
-        self.assertEqual(state["week_key"], "2026-08-23")
+        self.assertEqual(state["week_key"], "2026-08-30")
 
     def test_opens_thursday_2130(self):
         now = datetime(2026, 8, 27, 21, 30, tzinfo=TZ)
@@ -36,7 +36,24 @@ class SundayEnrollmentTests(unittest.TestCase):
         state = get_slot_state("sunday", now)
         self.assertFalse(state["is_open"])
         self.assertTrue(state["is_past"])
+        self.assertFalse(state["is_ended"])
         self.assertEqual(state["week_key"], "2026-08-30")
+
+    def test_stays_on_same_week_until_2201(self):
+        now = datetime(2026, 8, 30, 22, 0, tzinfo=TZ)
+        state = get_slot_state("sunday", now)
+        self.assertEqual(state["week_key"], "2026-08-30")
+        self.assertTrue(state["is_past"])
+        self.assertFalse(state["is_ended"])
+
+    def test_rolls_to_next_week_at_2201(self):
+        now = datetime(2026, 8, 30, 22, 1, tzinfo=TZ)
+        state = get_slot_state("sunday", now)
+        self.assertEqual(state["week_key"], "2026-09-06")
+        self.assertEqual(state["prev_week_key"], "2026-08-30")
+        self.assertFalse(state["is_open"])
+        self.assertFalse(state["is_ended"])
+        self.assertFalse(state["is_past"])
 
 
 class WednesdayEnrollmentTests(unittest.TestCase):
@@ -137,6 +154,16 @@ class MatchDayTests(unittest.TestCase):
         self.assertEqual(nxt, datetime(2026, 9, 2, 20, 0, tzinfo=TZ))
         wed_morning = datetime(2026, 8, 26, 10, 0, tzinfo=TZ)
         self.assertEqual(next_game_at(wed_morning), datetime(2026, 8, 26, 20, 0, tzinfo=TZ))
+        after_end = datetime(2026, 8, 30, 22, 1, tzinfo=TZ)
+        self.assertEqual(next_game_at(after_end), datetime(2026, 9, 2, 20, 0, tzinfo=TZ))
+
+    def test_banner_stops_flashing_at_2201(self):
+        sunday_afternoon = datetime(2026, 8, 30, 16, 0, tzinfo=TZ)
+        sunday_after = datetime(2026, 8, 30, 22, 1, tzinfo=TZ)
+        friday = datetime(2026, 8, 28, 14, 0, tzinfo=TZ)
+        self.assertTrue(banner_should_flash(sunday_afternoon))
+        self.assertFalse(banner_should_flash(sunday_after))
+        self.assertFalse(banner_should_flash(friday))
 
     def test_hour_before_window(self):
         from reminders import hour_before_is_due

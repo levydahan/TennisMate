@@ -54,9 +54,12 @@ function costSplit(game) {
 
 function renderPlayerRow(player, index, { waitlist = false, admin = false, game = null } = {}) {
   const actions = [];
-  if (!waitlist && game) {
+  if (!waitlist && game && player.is_me) {
     const pay = bitPayButton(game, player);
     if (pay) actions.push(pay);
+    if (!player.paid) {
+      actions.push(`<button class="me-paid-btn" data-me-paid="${player.id}" type="button">סימנתי ששילמתי</button>`);
+    }
   }
   if (admin) {
     if (!waitlist) {
@@ -106,6 +109,7 @@ function bitAppHref() {
 }
 
 function bitPayButton(game, player) {
+  if (!player.is_me) return "";
   if (player.paid) return "";
   if (game.booker_id && game.booker_id === player.id) return "";
   const amount = formatShare(game.share);
@@ -185,48 +189,25 @@ function statusLabel(status) {
   return "לא הגיע";
 }
 
-function renderSquad(game) {
-  const canJoin = game.is_open || state.is_admin;
-  const squad = ensureSquad(game);
-  const arrived = squad.filter((p) => p.status === "arrived").map((p) => p.name);
-  const missed = squad.filter((p) => p.status === "out").map((p) => p.name);
-  const waiting = squad.filter((p) => p.status === "waitlist").map((p) => p.name);
-  return `
-    <div class="squad collapsed">
-      <button type="button" class="squad-toggle" data-squad-toggle aria-expanded="false">
-        <span class="squad-toggle-title">מי מגיע</span>
-        <span class="hero-toggle-action">הרחב</span>
-      </button>
-      <div class="squad-body">
-      <ul class="name-checks">
-        ${squad.map((player) => {
-          const checked = player.status !== "out";
-          const canToggle = canJoin && (!checked || state.is_admin);
-          return `
-            <li class="name-check ${player.status}">
-              <button type="button" class="name-check-btn"
-                data-toggle-name="${esc(player.name)}"
-                data-slot="${game.slot}"
-                data-id="${player.id || ""}"
-                data-checked="${checked ? "1" : "0"}"
-                aria-pressed="${checked ? "true" : "false"}"
-                ${canToggle ? "" : "disabled"}>
-                <span class="box" aria-hidden="true">${checked ? "✓" : ""}</span>
-                <span class="check-name">${esc(player.name)}</span>
-                <span class="check-status">${statusLabel(player.status)}</span>
-              </button>
-            </li>
-          `;
-        }).join("")}
-      </ul>
-      <div class="arrival-summary">
-        <p><strong>הגיעו:</strong> ${arrived.length ? arrived.map(esc).join(" · ") : "אין עדיין"}</p>
-        <p><strong>לא הגיעו:</strong> ${missed.length ? missed.map(esc).join(" · ") : "כולם הגיעו"}</p>
-        ${waiting.length ? `<p><strong>המתנה:</strong> ${waiting.map(esc).join(" · ")}</p>` : ""}
-      </div>
-      </div>
-    </div>
-  `;
+function renderJoin(game) {
+  if (game.is_ended) return "";
+  if (!state.user) {
+    return game.is_open ? `<p class="muted join-row">התחברו כדי להירשם למשחק</p>` : "";
+  }
+  const mine = [...(game.roster || []), ...(game.waiting || [])].some((p) => p.is_me);
+  if (mine) {
+    return `<p class="muted join-row">אתה רשום למשחק</p>`;
+  }
+  if (state.unpaid) {
+    return `<p class="pay-warn join-row">${esc(state.pay_warning || "הלו הלו לא שילמת למשחקת תשלם עכשיו")}</p>`;
+  }
+  if (game.is_open) {
+    return `<div class="join-row"><button class="primary-btn" data-join="${game.slot}" type="button">אני מגיע</button></div>`;
+  }
+  if (state.is_admin) {
+    return `<div class="join-row"><button class="primary-btn" data-join="${game.slot}" type="button">אני מגיע</button></div>`;
+  }
+  return "";
 }
 
 function renderHistory(game) {
@@ -252,7 +233,7 @@ function renderHistory(game) {
 }
 
 function renderGame(game) {
-  const statusClass = game.is_open ? "open" : game.is_past ? "past" : "closed";
+  const statusClass = game.is_ended ? "ended" : game.is_open ? "open" : game.is_past ? "past" : "closed";
   const filled = (game.count / game.max_players) * 100;
   const emptySlots = Math.max(game.max_players - game.count, 0);
   const rosterHtml = game.roster.map((p, i) => renderPlayerRow(p, i, { admin: state.is_admin, game })).join("")
@@ -287,7 +268,7 @@ function renderGame(game) {
       <div class="bar"><span style="width:${filled}%"></span></div>
       <ul class="player-list">${rosterHtml}</ul>
       ${waitingHtml}
-      ${renderSquad(game)}
+      ${renderJoin(game)}
       ${renderTeams(game)}
       ${renderHistory(game)}
       ${state.is_admin ? `<div class="admin-tools"><button class="tiny-btn danger" data-clear="${game.slot}" type="button">ניקוי רשימה</button></div>` : ""}
@@ -323,7 +304,8 @@ function renderField(games) {
               <span>${esc(p.name)}${game.booker_id === p.id ? ' <span class="booker-tag">מזמין</span>' : ""}</span>
               <span class="pay-right">
                 ${shareText(game.share)}${p.paid ? ' <span class="paid-tag">שולם</span>' : ""}
-                ${bitPayButton(game, p)}
+                ${p.is_me ? bitPayButton(game, p) : ""}
+                ${p.is_me && !p.paid ? `<button class="me-paid-btn" data-me-paid="${p.id}" type="button">סימנתי ששילמתי</button>` : ""}
               </span>
             </li>
           `).join("")}
@@ -405,9 +387,17 @@ function renderStats() {
 }
 
 function isMatchDay() {
+  if (state.banner_flash === false) return false;
+  if (state.banner_flash === true) return true;
   if (state.is_match_day) return true;
   const local = location.hostname === "127.0.0.1" || location.hostname === "localhost";
   return local && new URLSearchParams(location.search).get("match_day") === "1";
+}
+
+function bannerShouldFlash() {
+  if (state.banner_flash === true) return true;
+  if (state.banner_flash === false) return false;
+  return isMatchDay();
 }
 
 function formatCountdown(ms) {
@@ -430,7 +420,7 @@ function nextGameMs() {
 }
 
 function matchInProgress() {
-  if (!isMatchDay()) return false;
+  if (!bannerShouldFlash()) return false;
   const start = state.match_game_at
     ? Date.parse(state.match_game_at)
     : (() => {
@@ -438,7 +428,7 @@ function matchInProgress() {
         d.setHours(20, 0, 0, 0);
         return d.getTime();
       })();
-  const end = start + 2 * 60 * 60 * 1000;
+  const end = start + (2 * 60 + 1) * 60 * 1000;
   const now = Date.now();
   return now >= start && now < end;
 }
@@ -449,12 +439,12 @@ function tickCountdown() {
   const title = document.getElementById("matchBannerTitle");
   if (!banner || !el) return;
   banner.hidden = false;
-  const matchDay = isMatchDay();
-  banner.classList.toggle("match-day", matchDay);
+  const flash = bannerShouldFlash();
+  banner.classList.toggle("match-day", flash);
   if (title) {
-    title.textContent = matchDay
+    title.textContent = flash
       ? "יום המשחק הגיע"
-      : `המשחק הבא · ${state.next_game_label_he || ""}`.trim();
+      : `המשחק הבא · ${state.next_game_at_he || state.next_game_label_he || ""}`.trim();
   }
   if (matchInProgress()) {
     el.textContent = "המשחק התחיל";
@@ -466,15 +456,42 @@ function tickCountdown() {
     return;
   }
   const left = at - Date.now();
-  el.textContent = left <= 0 ? "המשחק התחיל" : `מתחילים בעוד ${formatCountdown(left)}`;
+  el.textContent = left <= 0
+    ? (state.next_game_at_he || "המשחק הבא")
+    : `מתחילים בעוד ${formatCountdown(left)}`;
 }
 
 function renderMatchBanner() {
   tickCountdown();
 }
 
+function renderAuth() {
+  const loggedOut = document.getElementById("authLoggedOut");
+  const loggedIn = document.getElementById("authLoggedIn");
+  const hello = document.getElementById("authHello");
+  const payWarn = document.getElementById("payWarn");
+  if (state.user) {
+    if (loggedOut) loggedOut.hidden = true;
+    if (loggedIn) loggedIn.hidden = false;
+    if (hello) hello.textContent = state.user.name;
+  } else {
+    if (loggedOut) loggedOut.hidden = false;
+    if (loggedIn) loggedIn.hidden = true;
+  }
+  if (payWarn) {
+    if (state.unpaid && state.pay_warning) {
+      payWarn.hidden = false;
+      payWarn.textContent = state.pay_warning;
+    } else {
+      payWarn.hidden = true;
+      payWarn.textContent = "";
+    }
+  }
+}
+
 function render() {
   adminBtn.textContent = state.is_admin ? "יציאה ממנהל" : "מנהל";
+  renderAuth();
   renderMatchBanner();
   const notifyBtn = document.getElementById("notifyBtn");
   if (notifyBtn) {
@@ -487,7 +504,6 @@ function render() {
     ? `<p class="persist-warn">כדי שהרשימות לא יימחקו בעדכון ב-Render, חברו מסד PostgreSQL והגדירו DATABASE_URL.</p>`
     : "";
   gamesEl.innerHTML = warn + state.games.map(renderGame).join("");
-  applySquadCollapsed(isSquadCollapsed());
   renderField(state.games);
   renderStats();
 }
@@ -509,31 +525,17 @@ gamesEl.addEventListener("click", async (e) => {
     onBitPayClick(bitLink);
     return;
   }
-  const squadToggle = e.target.closest("[data-squad-toggle]");
-  if (squadToggle) {
-    const next = !isSquadCollapsed();
-    applySquadCollapsed(next);
-    try {
-      localStorage.setItem(SQUAD_COLLAPSE_KEY, next ? "1" : "0");
-    } catch (err) {}
+  const joinBtn = e.target.closest("[data-join]");
+  if (joinBtn) {
+    joinBtn.disabled = true;
+    const data = await api("/api/join", { slot: joinBtn.dataset.join });
+    applyState(data);
     return;
   }
-  const toggle = e.target.closest("[data-toggle-name]");
-  if (toggle) {
-    if (toggle.disabled) return;
-    const checked = toggle.dataset.checked === "1";
-    toggle.disabled = true;
-    if (!checked) {
-      const data = await api("/api/join", { slot: toggle.dataset.slot, name: toggle.dataset.toggleName });
-      applyState(data);
-      return;
-    }
-    if (!state.is_admin) {
-      showToast("רק המנהל יכול להסיר שחקנים");
-      applyState(state);
-      return;
-    }
-    const data = await api("/api/admin/remove", { id: Number(toggle.dataset.id) });
+  const mePaid = e.target.closest("[data-me-paid]");
+  if (mePaid) {
+    mePaid.disabled = true;
+    const data = await api("/api/me/paid", { id: Number(mePaid.dataset.mePaid) });
     applyState(data);
     return;
   }
@@ -591,9 +593,17 @@ statsListsEl.addEventListener("click", async (e) => {
   payBtn.disabled = false;
 });
 
-fieldListsEl.addEventListener("click", (e) => {
+fieldListsEl.addEventListener("click", async (e) => {
   const bitLink = e.target.closest("[data-bit-pay]");
-  if (bitLink) onBitPayClick(bitLink);
+  if (bitLink) {
+    onBitPayClick(bitLink);
+    return;
+  }
+  const mePaid = e.target.closest("[data-me-paid]");
+  if (!mePaid) return;
+  mePaid.disabled = true;
+  const data = await api("/api/me/paid", { id: Number(mePaid.dataset.mePaid) });
+  applyState(data);
 });
 
 fieldListsEl.addEventListener("change", async (e) => {
@@ -701,25 +711,72 @@ function scheduleLocalReminders(registration) {
 }
 
 const HERO_COLLAPSE_KEY = "tm-hero-collapsed";
-const SQUAD_COLLAPSE_KEY = "tm-squad-collapsed";
 
-function isSquadCollapsed() {
-  try {
-    return localStorage.getItem(SQUAD_COLLAPSE_KEY) !== "0";
-  } catch (e) {
-    return true;
+function initAuth() {
+  const form = document.getElementById("authForm");
+  const registerBtn = document.getElementById("authRegisterBtn");
+  const resetBtn = document.getElementById("authResetBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
+  const nameBlock = document.getElementById("authNameBlock");
+  const resetNote = document.getElementById("authResetNote");
+  let registerMode = false;
+
+  if (registerBtn) {
+    registerBtn.addEventListener("click", async () => {
+      if (!registerMode) {
+        registerMode = true;
+        if (nameBlock) nameBlock.hidden = false;
+        showToast("הזינו שם לתצוגה ולחצו הרשמה שוב");
+        return;
+      }
+      const data = await api("/api/register", {
+        email: document.getElementById("authEmail").value,
+        password: document.getElementById("authPassword").value,
+        name: document.getElementById("authName").value,
+      });
+      applyState(data);
+    });
   }
-}
 
-function applySquadCollapsed(collapsed) {
-  document.querySelectorAll(".squad").forEach((el) => {
-    el.classList.toggle("collapsed", collapsed);
-    const btn = el.querySelector("[data-squad-toggle]");
-    if (!btn) return;
-    btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-    const action = btn.querySelector(".hero-toggle-action");
-    if (action) action.textContent = collapsed ? "הרחב" : "מזער";
-  });
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (registerMode) {
+        const data = await api("/api/register", {
+          email: document.getElementById("authEmail").value,
+          password: document.getElementById("authPassword").value,
+          name: document.getElementById("authName").value,
+        });
+        applyState(data);
+        return;
+      }
+      const data = await api("/api/login", {
+        email: document.getElementById("authEmail").value,
+        password: document.getElementById("authPassword").value,
+      });
+      applyState(data);
+    });
+  }
+
+  if (resetBtn) {
+    resetBtn.addEventListener("click", async () => {
+      const data = await api("/api/reset-password", {
+        email: document.getElementById("authEmail").value,
+      });
+      applyState(data);
+      if (data.ok && data.new_password && resetNote) {
+        resetNote.hidden = false;
+        resetNote.textContent = `הסיסמה החדשה: ${data.new_password}`;
+      }
+    });
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", async () => {
+      const data = await api("/api/logout", {});
+      applyState(data);
+    });
+  }
 }
 
 function applyHeroCollapsed(collapsed) {
@@ -781,6 +838,7 @@ function initStatsToggle() {
 const notifyBtn = document.getElementById("notifyBtn");
 if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
 
+initAuth();
 initHeroToggle();
 initStatsToggle();
 
