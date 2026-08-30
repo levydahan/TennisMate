@@ -123,6 +123,14 @@ body {
   flex: none;
 }
 
+.page.login-only {
+  padding-top: calc(24px + env(safe-area-inset-top, 0px));
+}
+
+#appScreen[hidden] {
+  display: none !important;
+}
+
 .hero-card, .game-card, .field-card, .stats-card {
   background: var(--card);
   color: var(--ink);
@@ -200,6 +208,33 @@ body {
 
 .stats-card.collapsed .stats-body {
   display: none;
+}
+
+.game-fold {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed #bbf7d0;
+}
+
+.game-fold.collapsed .game-fold-body {
+  display: none;
+}
+
+.game-fold .hero-toggle .hero-title {
+  font-size: 1.05rem;
+}
+
+.game-card select {
+  width: 100%;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 2px solid #bbf7d0;
+  background: white;
+  min-height: 48px;
+  margin-bottom: 8px;
 }
 
 .stats-toggle-copy .hero-title {
@@ -773,6 +808,15 @@ body {
 }
 
 .auth-hello { margin: 0 0 10px; font-weight: 700; }
+.auth-error {
+  margin: 0 0 10px;
+  font-weight: 800;
+  color: #991b1b;
+  background: #fee2e2;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.auth-error[hidden] { display: none !important; }
 .reset-note {
   margin: 12px 0 0;
   font-weight: 800;

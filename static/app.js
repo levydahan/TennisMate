@@ -1,5 +1,4 @@
 const gamesEl = document.getElementById("games");
-const fieldListsEl = document.getElementById("fieldLists");
 const statsListsEl = document.getElementById("statsLists");
 const toastEl = document.getElementById("toast");
 const adminBtn = document.getElementById("adminBtn");
@@ -152,7 +151,7 @@ function renderTeams(game) {
     return `<p class="draw-note">הגרלת הקבוצות תתבצע אוטומטית ב־${esc(game.draw_at_he)}</p>`;
   }
   if (!game.teams || !game.teams.length) {
-    if (!game.count) return "";
+    if (!game.count) return `<p class="draw-note">אין מספיק שחקנים להגרלת קבוצות</p>`;
     return `<p class="draw-note">אין מספיק שחקנים להגרלת קבוצות</p>`;
   }
   const hour2 = game.rematch_ready && game.teams2 && game.teams2.length
@@ -168,6 +167,89 @@ function renderTeams(game) {
     </div>
     ${hour2}
   `;
+}
+
+function foldStorageKey(kind, game) {
+  return `tm-${kind}-collapsed-${game.slot}-${game.week_key || ""}`;
+}
+
+function isFoldCollapsed(kind, game) {
+  try {
+    return localStorage.getItem(foldStorageKey(kind, game)) !== "0";
+  } catch (e) {
+    return true;
+  }
+}
+
+function renderFold(kind, game, title, subtitle, bodyHtml) {
+  const collapsed = isFoldCollapsed(kind, game);
+  const key = foldStorageKey(kind, game);
+  return `
+    <div class="game-fold${collapsed ? " collapsed" : ""}" data-fold="${kind}" data-fold-key="${esc(key)}">
+      <button type="button" class="hero-toggle game-fold-toggle" data-fold-toggle aria-expanded="${collapsed ? "false" : "true"}">
+        <span class="hero-toggle-copy">
+          <span class="kicker">${esc(title)}</span>
+          <span class="hero-title">${esc(subtitle)}</span>
+        </span>
+        <span class="hero-toggle-action">${collapsed ? "הרחב" : "מזער"}</span>
+      </button>
+      <div class="game-fold-body">${bodyHtml}</div>
+    </div>
+  `;
+}
+
+function renderFieldFold(game) {
+  const subtitle = game.booker_name
+    ? `${costSplit(game)} · ${game.booker_name}`
+    : costSplit(game);
+  let body;
+  if (!game.roster.length) {
+    body = `<p class="share">${costSplit(game)}</p>`;
+  } else {
+    const select = game.is_ended
+      ? ""
+      : `
+        <label class="booker-label">מי יזמין את המגרש</label>
+        <select data-booker="${game.slot}">
+          <option value="">בחרו מי יזמין את המגרש</option>
+          ${game.roster.map((p) => `
+            <option value="${p.id}" ${game.booker_id === p.id ? "selected" : ""}>${esc(p.name)}</option>
+          `).join("")}
+        </select>
+      `;
+    body = `
+      <p class="share">${costSplit(game)}</p>
+      ${select}
+      ${game.booker_name
+        ? `<p class="booker-picked">המזמין: <strong>${esc(game.booker_name)}</strong></p>`
+        : `<p class="booker-picked muted">עדיין לא נבחר מזמין</p>`}
+      <ul class="pay-list">
+        ${game.roster.map((p) => `
+          <li class="${p.paid ? "paid" : ""} ${game.booker_id === p.id ? "booker" : ""}">
+            <span>${esc(p.name)}${game.booker_id === p.id ? ' <span class="booker-tag">מזמין</span>' : ""}</span>
+            <span class="pay-right">
+              ${shareText(game.share)}${p.paid ? ' <span class="paid-tag">שולם</span>' : ""}
+              ${p.is_me ? bitPayButton(game, p) : ""}
+              ${p.is_me && !p.paid ? `<button class="me-paid-btn" data-me-paid="${p.id}" type="button">סימנתי ששילמתי</button>` : ""}
+            </span>
+          </li>
+        `).join("")}
+      </ul>
+    `;
+  }
+  return renderFold("field", game, "מזמין המגרש", subtitle, body);
+}
+
+function renderTeamsFold(game) {
+  let subtitle = "הגרלת זוגות";
+  if (game.teams_ready && game.teams && game.teams.length) {
+    subtitle = game.rematch_ready && game.teams2 && game.teams2.length
+      ? "שעה ראשונה ושנייה"
+      : "שעה ראשונה · 20:00";
+  } else if (!game.teams_ready && game.draw_at_he) {
+    subtitle = `ב־${game.draw_at_he}`;
+  }
+  return renderFold("teams", game, "הגרלת זוגות", subtitle, renderTeams(game));
 }
 
 function ensureSquad(game) {
@@ -269,50 +351,12 @@ function renderGame(game) {
       <ul class="player-list">${rosterHtml}</ul>
       ${waitingHtml}
       ${renderJoin(game)}
-      ${renderTeams(game)}
+      ${renderFieldFold(game)}
+      ${renderTeamsFold(game)}
       ${renderHistory(game)}
       ${state.is_admin ? `<div class="admin-tools"><button class="tiny-btn danger" data-clear="${game.slot}" type="button">ניקוי רשימה</button></div>` : ""}
     </article>
   `;
-}
-
-function renderField(games) {
-  fieldListsEl.innerHTML = games.map((game) => {
-    if (!game.roster.length) {
-      return `
-        <div class="field-game">
-          <h3>${esc(game.label_he)}</h3>
-          <p class="share">אין נרשמים עדיין · 60 ₪ על המגרש</p>
-        </div>
-      `;
-    }
-    const options = [`<option value="">בחרו מי יזמין את המגרש</option>`]
-      .concat(game.roster.map((p) => `
-        <option value="${p.id}" ${game.booker_id === p.id ? "selected" : ""}>${esc(p.name)}</option>
-      `))
-      .join("");
-    return `
-      <div class="field-game">
-        <h3>${esc(game.label_he)}</h3>
-        <p class="share">${costSplit(game)}</p>
-        <label class="booker-label">מי יזמין את המגרש</label>
-        <select data-booker="${game.slot}">${options}</select>
-        ${game.booker_name ? `<p class="booker-picked">המזמין: <strong>${esc(game.booker_name)}</strong></p>` : `<p class="booker-picked muted">עדיין לא נבחר מזמין</p>`}
-        <ul class="pay-list">
-          ${game.roster.map((p) => `
-            <li class="${p.paid ? "paid" : ""} ${game.booker_id === p.id ? "booker" : ""}">
-              <span>${esc(p.name)}${game.booker_id === p.id ? ' <span class="booker-tag">מזמין</span>' : ""}</span>
-              <span class="pay-right">
-                ${shareText(game.share)}${p.paid ? ' <span class="paid-tag">שולם</span>' : ""}
-                ${p.is_me ? bitPayButton(game, p) : ""}
-                ${p.is_me && !p.paid ? `<button class="me-paid-btn" data-me-paid="${p.id}" type="button">סימנתי ששילמתי</button>` : ""}
-              </span>
-            </li>
-          `).join("")}
-        </ul>
-      </div>
-    `;
-  }).join("");
 }
 
 function sparkDots(history, onClass, offClass) {
@@ -433,11 +477,30 @@ function matchInProgress() {
   return now >= start && now < end;
 }
 
+function isPlayerLoggedIn() {
+  return Boolean(state.user);
+}
+
+function applyScreen() {
+  const loggedIn = isPlayerLoggedIn();
+  const appScreen = document.getElementById("appScreen");
+  const banner = document.getElementById("matchBanner");
+  const page = document.querySelector(".page");
+  if (appScreen) appScreen.hidden = !loggedIn;
+  if (banner) banner.hidden = !loggedIn;
+  document.body.classList.toggle("login-only", !loggedIn);
+  if (page) page.classList.toggle("login-only", !loggedIn);
+}
+
 function tickCountdown() {
   const banner = document.getElementById("matchBanner");
   const el = document.getElementById("matchCountdown");
   const title = document.getElementById("matchBannerTitle");
   if (!banner || !el) return;
+  if (!isPlayerLoggedIn()) {
+    banner.hidden = true;
+    return;
+  }
   banner.hidden = false;
   const flash = bannerShouldFlash();
   banner.classList.toggle("match-day", flash);
@@ -492,6 +555,7 @@ function renderAuth() {
 function render() {
   adminBtn.textContent = state.is_admin ? "יציאה ממנהל" : "מנהל";
   renderAuth();
+  applyScreen();
   renderMatchBanner();
   const notifyBtn = document.getElementById("notifyBtn");
   if (notifyBtn) {
@@ -500,11 +564,15 @@ function render() {
       ? "תזכורות תשלום פעילות"
       : "הפעלת תזכורת תשלום";
   }
+  if (!isPlayerLoggedIn()) {
+    if (gamesEl) gamesEl.innerHTML = "";
+    if (statsListsEl) statsListsEl.innerHTML = "";
+    return;
+  }
   const warn = state.is_admin && state.persistent === false
     ? `<p class="persist-warn">כדי שהרשימות לא יימחקו בעדכון ב-Render, חברו מסד PostgreSQL והגדירו DATABASE_URL.</p>`
     : "";
   gamesEl.innerHTML = warn + state.games.map(renderGame).join("");
-  renderField(state.games);
   renderStats();
 }
 
@@ -520,6 +588,20 @@ async function refresh() {
 }
 
 gamesEl.addEventListener("click", async (e) => {
+  const foldBtn = e.target.closest("[data-fold-toggle]");
+  if (foldBtn) {
+    const wrap = foldBtn.closest(".game-fold");
+    if (!wrap) return;
+    const next = !wrap.classList.contains("collapsed");
+    wrap.classList.toggle("collapsed", next);
+    foldBtn.setAttribute("aria-expanded", next ? "false" : "true");
+    const action = foldBtn.querySelector(".hero-toggle-action");
+    if (action) action.textContent = next ? "הרחב" : "מזער";
+    try {
+      localStorage.setItem(wrap.dataset.foldKey, next ? "1" : "0");
+    } catch (err) {}
+    return;
+  }
   const bitLink = e.target.closest("[data-bit-pay]");
   if (bitLink) {
     onBitPayClick(bitLink);
@@ -574,6 +656,13 @@ gamesEl.addEventListener("click", async (e) => {
 });
 
 gamesEl.addEventListener("change", async (e) => {
+  const select = e.target.closest("[data-booker]");
+  if (select) {
+    const playerId = select.value ? Number(select.value) : null;
+    const data = await api("/api/booker", { slot: select.dataset.booker, player_id: playerId });
+    applyState(data);
+    return;
+  }
   const box = e.target.closest("[data-paid]");
   if (!box) return;
   const data = await api("/api/admin/paid", { id: Number(box.dataset.paid), paid: box.checked });
@@ -591,27 +680,6 @@ statsListsEl.addEventListener("click", async (e) => {
     new Notification(first.title, { body: first.body, dir: "rtl", lang: "he" });
   }
   payBtn.disabled = false;
-});
-
-fieldListsEl.addEventListener("click", async (e) => {
-  const bitLink = e.target.closest("[data-bit-pay]");
-  if (bitLink) {
-    onBitPayClick(bitLink);
-    return;
-  }
-  const mePaid = e.target.closest("[data-me-paid]");
-  if (!mePaid) return;
-  mePaid.disabled = true;
-  const data = await api("/api/me/paid", { id: Number(mePaid.dataset.mePaid) });
-  applyState(data);
-});
-
-fieldListsEl.addEventListener("change", async (e) => {
-  const select = e.target.closest("[data-booker]");
-  if (!select) return;
-  const playerId = select.value ? Number(select.value) : null;
-  const data = await api("/api/booker", { slot: select.dataset.booker, player_id: playerId });
-  applyState(data);
 });
 
 adminBtn.addEventListener("click", async () => {
@@ -711,6 +779,59 @@ function scheduleLocalReminders(registration) {
 }
 
 const HERO_COLLAPSE_KEY = "tm-hero-collapsed";
+const AUTH_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function showAuthError(message, { toast = true } = {}) {
+  const el = document.getElementById("authError");
+  if (el) {
+    el.hidden = !message;
+    el.textContent = message || "";
+  }
+  if (message && toast) showToast(message);
+}
+
+function authValues() {
+  return {
+    email: (document.getElementById("authEmail")?.value || "").trim(),
+    password: document.getElementById("authPassword")?.value || "",
+    name: (document.getElementById("authName")?.value || "").trim(),
+  };
+}
+
+function validateAuth({ needPassword = false, needName = false } = {}) {
+  const values = authValues();
+  if (!values.email) {
+    showAuthError("יש להזין אימייל");
+    return null;
+  }
+  if (!AUTH_EMAIL_RE.test(values.email)) {
+    showAuthError("אימייל לא תקין");
+    return null;
+  }
+  if (needPassword && !values.password) {
+    showAuthError("יש להזין סיסמה");
+    return null;
+  }
+  if (needPassword && values.password.length < 6) {
+    showAuthError("הסיסמה חייבת לפחות 6 תווים");
+    return null;
+  }
+  if (needName && !values.name) {
+    showAuthError("יש להזין שם");
+    return null;
+  }
+  showAuthError("");
+  return values;
+}
+
+function applyAuthResult(data) {
+  applyState(data);
+  if (!data.ok && data.message) showAuthError(data.message, { toast: false });
+  if (data.ok && data.user) {
+    showAuthError("");
+    window.scrollTo(0, 0);
+  }
+}
 
 function initAuth() {
   const form = document.getElementById("authForm");
@@ -726,15 +847,14 @@ function initAuth() {
       if (!registerMode) {
         registerMode = true;
         if (nameBlock) nameBlock.hidden = false;
+        showAuthError("");
         showToast("הזינו שם לתצוגה ולחצו הרשמה שוב");
         return;
       }
-      const data = await api("/api/register", {
-        email: document.getElementById("authEmail").value,
-        password: document.getElementById("authPassword").value,
-        name: document.getElementById("authName").value,
-      });
-      applyState(data);
+      const values = validateAuth({ needPassword: true, needName: true });
+      if (!values) return;
+      const data = await api("/api/register", values);
+      applyAuthResult(data);
     });
   }
 
@@ -742,28 +862,28 @@ function initAuth() {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (registerMode) {
-        const data = await api("/api/register", {
-          email: document.getElementById("authEmail").value,
-          password: document.getElementById("authPassword").value,
-          name: document.getElementById("authName").value,
-        });
-        applyState(data);
+        const values = validateAuth({ needPassword: true, needName: true });
+        if (!values) return;
+        const data = await api("/api/register", values);
+        applyAuthResult(data);
         return;
       }
+      const values = validateAuth({ needPassword: true });
+      if (!values) return;
       const data = await api("/api/login", {
-        email: document.getElementById("authEmail").value,
-        password: document.getElementById("authPassword").value,
+        email: values.email,
+        password: values.password,
       });
-      applyState(data);
+      applyAuthResult(data);
     });
   }
 
   if (resetBtn) {
     resetBtn.addEventListener("click", async () => {
-      const data = await api("/api/reset-password", {
-        email: document.getElementById("authEmail").value,
-      });
-      applyState(data);
+      const values = validateAuth();
+      if (!values) return;
+      const data = await api("/api/reset-password", { email: values.email });
+      applyAuthResult(data);
       if (data.ok && data.new_password && resetNote) {
         resetNote.hidden = false;
         resetNote.textContent = `הסיסמה החדשה: ${data.new_password}`;

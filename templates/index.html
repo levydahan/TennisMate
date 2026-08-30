@@ -12,11 +12,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=19" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=21" />
 </head>
-<body>
-  <div class="page">
-  <div id="matchBanner" class="match-banner">
+<body class="login-only">
+  <div class="page login-only">
+  <div id="matchBanner" class="match-banner" hidden>
     <div id="matchBannerTitle" class="match-banner-title">המשחק הבא</div>
     <div id="matchCountdown" class="match-countdown"></div>
   </div>
@@ -35,10 +35,10 @@
     <section class="auth-card" id="authCard">
       <div id="authLoggedOut">
         <h2>כניסה לשחקנים</h2>
-        <p class="muted">אימייל וסיסמה. איפוס סיסמה מיידי בלי מייל אישור.</p>
-        <form id="authForm">
+        <form id="authForm" novalidate>
+          <p id="authError" class="auth-error" hidden></p>
           <label for="authEmail">אימייל</label>
-          <input id="authEmail" type="email" autocomplete="username" required />
+          <input id="authEmail" type="email" autocomplete="username" />
           <label for="authPassword">סיסמה</label>
           <input id="authPassword" type="password" autocomplete="current-password" />
           <div id="authNameBlock" hidden>
@@ -58,6 +58,7 @@
         <button type="button" class="ghost-btn" id="logoutBtn">יציאה</button>
       </div>
     </section>
+    <div id="appScreen" hidden>
     <div id="payWarn" class="pay-warn" hidden></div>
     <section class="hero-card collapsed" id="heroCard">
       <button type="button" class="hero-toggle" id="heroToggle" aria-expanded="false" aria-controls="heroBody">
@@ -104,15 +105,6 @@
 
     <div id="games" class="games"></div>
 
-    <section class="field-card" id="fieldSection">
-      <div class="field-head">
-        <h2>הזמנת מגרש</h2>
-        <span class="cost-pill">60 ₪ למשחק</span>
-      </div>
-      <p class="muted">עלות המגרש 60 ₪ מחולקת שווה בשווה. רק המזמין נבחר מהרשימה. כפתור ביט וסימון שולם מופיעים רק אצלכם.</p>
-      <div id="fieldLists"></div>
-    </section>
-
     <section class="stats-card collapsed" id="statsSection">
       <button type="button" class="hero-toggle" id="statsToggle" aria-expanded="false" aria-controls="statsBody">
         <span class="hero-toggle-copy">
@@ -139,6 +131,7 @@
         }
       } catch (e) {}
     </script>
+    </div>
   </main>
   </div>
 
@@ -156,6 +149,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=19"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=21"></script>
 </body>
 </html>

@@ -86,6 +86,7 @@ class JoinAndWaitlistTests(unittest.TestCase):
             "password": "wrong-password",
         })
         self.assertEqual(denied.status_code, 401)
+        self.assertEqual(denied.get_json()["message"], "אימייל או סיסמה שגויים")
         reset = self.client.post("/api/reset-password", json={"email": "levi@example.com"})
         reset_data = reset.get_json()
         self.assertTrue(reset_data["ok"], reset_data)
@@ -96,6 +97,38 @@ class JoinAndWaitlistTests(unittest.TestCase):
             "password": reset_data["new_password"],
         })
         self.assertTrue(login.get_json()["ok"])
+
+    def test_auth_error_messages_are_hebrew(self):
+        bad_email = self.client.post("/api/register", json={
+            "email": "not-an-email",
+            "password": "secret1",
+            "name": "לוי",
+        })
+        self.assertEqual(bad_email.status_code, 400)
+        self.assertEqual(bad_email.get_json()["message"], "אימייל לא תקין")
+        short = self.client.post("/api/register", json={
+            "email": "ok@example.com",
+            "password": "123",
+            "name": "לוי",
+        })
+        self.assertEqual(short.get_json()["message"], "הסיסמה חייבת לפחות 6 תווים")
+        exists = self.client.post("/api/register", json={
+            "email": "ok@example.com",
+            "password": "secret1",
+            "name": "לוי",
+        })
+        self.assertTrue(exists.get_json()["ok"])
+        again = self.client.post("/api/register", json={
+            "email": "ok@example.com",
+            "password": "secret1",
+            "name": "דוד",
+        })
+        self.assertEqual(again.get_json()["message"], "האימייל כבר רשום")
+        empty = self.client.post("/api/login", json={"email": "", "password": "secret1"})
+        self.assertEqual(empty.get_json()["message"], "יש להזין אימייל")
+        missing = self.client.post("/api/reset-password", json={"email": "nobody@example.com"})
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.get_json()["message"], "האימייל לא נמצא")
 
     def test_unpaid_blocks_next_enroll_and_shows_warning(self):
         created = self.client.post("/api/register", json={

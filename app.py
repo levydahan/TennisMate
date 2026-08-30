@@ -889,6 +889,12 @@ def api_login():
     data = request.get_json(silent=True) or {}
     email = normalize_email(data.get("email"))
     password = str(data.get("password") or "")
+    if not email:
+        return jsonify({"ok": False, "message": "יש להזין אימייל"}), 400
+    if not EMAIL_RE.match(email):
+        return jsonify({"ok": False, "message": "אימייל לא תקין"}), 400
+    if not password:
+        return jsonify({"ok": False, "message": "יש להזין סיסמה"}), 400
     user = User.query.filter_by(email=email).first()
     if not user or not check_password_hash(user.password_hash, password):
         return jsonify({"ok": False, "message": "אימייל או סיסמה שגויים"}), 401
@@ -910,6 +916,10 @@ def api_logout():
 def api_reset_password():
     data = request.get_json(silent=True) or {}
     email = normalize_email(data.get("email"))
+    if not email:
+        return jsonify({"ok": False, "message": "יש להזין אימייל"}), 400
+    if not EMAIL_RE.match(email):
+        return jsonify({"ok": False, "message": "אימייל לא תקין"}), 400
     user = User.query.filter_by(email=email).first()
     if not user:
         return jsonify({"ok": False, "message": "האימייל לא נמצא"}), 404
