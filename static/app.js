@@ -594,7 +594,11 @@ function render() {
   const warn = state.is_admin && state.persistent === false
     ? `<p class="persist-warn">כדי שהרשימות לא יימחקו בעדכון ב-Render, חברו מסד PostgreSQL והגדירו DATABASE_URL.</p>`
     : "";
-  const upcoming = (state.games || []).filter((game) => !game.is_ended);
+  const upcoming = (state.games || [])
+    .filter((game) => !game.is_ended)
+    .slice()
+    .sort((a, b) => Date.parse(a.game_at) - Date.parse(b.game_at))
+    .slice(0, 1);
   const past = state.past_games || (state.games || []).filter((game) => game.is_ended);
   gamesEl.innerHTML = warn + upcoming.map(renderGame).join("");
   if (pastGamesEl) {

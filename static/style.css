@@ -19,11 +19,7 @@
 html {
   margin: 0;
   padding: 0;
-  height: auto;
   overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: auto;
   touch-action: manipulation;
 }
 
@@ -53,15 +49,30 @@ body {
 
 .top-banners {
   position: fixed;
-  top: calc(8px + env(safe-area-inset-top, 0px));
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 40;
-  width: calc(100% - 32px);
-  max-width: 560px;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  width: 100%;
+  max-width: none;
+  transform: none;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 8px;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 16px 10px;
+  background: linear-gradient(180deg, #14532d 78%, rgba(20, 83, 45, 0));
+  pointer-events: none;
+}
+
+.top-banners > * {
+  pointer-events: auto;
+  width: 100%;
+  max-width: 560px;
+}
+
+body.login-only .top-banners {
+  display: none;
 }
 
 .match-banner {

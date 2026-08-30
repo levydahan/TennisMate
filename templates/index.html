@@ -12,10 +12,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=23" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=24" />
 </head>
 <body class="login-only">
-  <div class="page login-only">
   <div id="topBanners" class="top-banners">
     <div id="matchBanner" class="match-banner" hidden>
       <div id="matchBannerTitle" class="match-banner-title">המשחק הבא</div>
@@ -23,6 +22,7 @@
     </div>
     <button id="payWarn" class="pay-warn-banner" type="button" hidden></button>
   </div>
+  <div class="page login-only">
   <header class="topbar">
     <div class="brand">
       <img class="brand-icon" src="{{ url_for('static', filename='racket.svg') }}" alt="" width="44" height="44" />
@@ -184,6 +184,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=23"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=24"></script>
 </body>
 </html>
