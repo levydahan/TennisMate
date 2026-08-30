@@ -284,10 +284,10 @@ function renderJoin(game) {
     return `<p class="pay-warn join-row">${esc(state.pay_warning || "הלו הלו לא שילמת למשחקת תשלם עכשיו")}</p>`;
   }
   if (game.is_open) {
-    return `<div class="join-row"><button class="primary-btn" data-join="${game.slot}" type="button">אני מגיע</button></div>`;
+    return `<div class="join-row"><button class="primary-btn" data-join="${game.slot}" type="button">הרשמה</button></div>`;
   }
   if (state.is_admin) {
-    return `<div class="join-row"><button class="primary-btn" data-join="${game.slot}" type="button">אני מגיע</button></div>`;
+    return `<div class="join-row"><button class="primary-btn" data-join="${game.slot}" type="button">הרשמה</button></div>`;
   }
   return "";
 }
@@ -840,21 +840,24 @@ function initAuth() {
   const logoutBtn = document.getElementById("logoutBtn");
   const nameBlock = document.getElementById("authNameBlock");
   const resetNote = document.getElementById("authResetNote");
+  const title = document.getElementById("authTitle");
+  const loginBtn = document.getElementById("authLoginBtn");
+  const nameInput = document.getElementById("authName");
   let registerMode = false;
 
+  function setRegisterMode(on) {
+    registerMode = on;
+    if (nameBlock) nameBlock.hidden = !on;
+    if (title) title.textContent = on ? "הרשמה לשחקנים" : "כניסה לשחקנים";
+    if (loginBtn) loginBtn.textContent = on ? "הרשמה" : "כניסה";
+    if (registerBtn) registerBtn.textContent = on ? "חזרה לכניסה" : "הרשמה";
+    if (on && nameInput) nameInput.focus();
+  }
+
   if (registerBtn) {
-    registerBtn.addEventListener("click", async () => {
-      if (!registerMode) {
-        registerMode = true;
-        if (nameBlock) nameBlock.hidden = false;
-        showAuthError("");
-        showToast("הזינו שם לתצוגה ולחצו הרשמה שוב");
-        return;
-      }
-      const values = validateAuth({ needPassword: true, needName: true });
-      if (!values) return;
-      const data = await api("/api/register", values);
-      applyAuthResult(data);
+    registerBtn.addEventListener("click", () => {
+      showAuthError("");
+      setRegisterMode(!registerMode);
     });
   }
 

@@ -772,6 +772,7 @@ body {
 
 .auth-card {
   background: #fff;
+  color: var(--ink);
   border: 2px solid #bbf7d0;
   border-radius: 20px;
   padding: 16px;
@@ -784,9 +785,14 @@ body {
   color: #14532d;
 }
 
+.auth-field {
+  margin: 0;
+}
+
 .auth-card label {
   display: block;
   font-weight: 800;
+  color: #14532d;
   margin: 10px 0 4px;
 }
 
@@ -798,6 +804,13 @@ body {
   border-radius: 14px;
   border: 2px solid #bbf7d0;
   box-sizing: border-box;
+  background: #fff;
+  color: #14532d;
+}
+
+.auth-card .ghost-btn {
+  background: #e5e7eb;
+  color: #14532d;
 }
 
 .auth-actions {

@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=21" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=22" />
 </head>
 <body class="login-only">
   <div class="page login-only">
@@ -34,14 +34,18 @@
   <main>
     <section class="auth-card" id="authCard">
       <div id="authLoggedOut">
-        <h2>כניסה לשחקנים</h2>
+        <h2 id="authTitle">כניסה לשחקנים</h2>
         <form id="authForm" novalidate>
           <p id="authError" class="auth-error" hidden></p>
-          <label for="authEmail">אימייל</label>
-          <input id="authEmail" type="email" autocomplete="username" />
-          <label for="authPassword">סיסמה</label>
-          <input id="authPassword" type="password" autocomplete="current-password" />
-          <div id="authNameBlock" hidden>
+          <div class="auth-field">
+            <label for="authEmail">אימייל</label>
+            <input id="authEmail" type="email" autocomplete="username" />
+          </div>
+          <div class="auth-field">
+            <label for="authPassword">סיסמה</label>
+            <input id="authPassword" type="password" autocomplete="current-password" />
+          </div>
+          <div class="auth-field" id="authNameBlock" hidden>
             <label for="authName">שם לתצוגה</label>
             <input id="authName" type="text" autocomplete="nickname" />
           </div>
@@ -69,7 +73,7 @@
         <span class="hero-toggle-action">הרחב</span>
       </button>
       <div id="heroBody" class="hero-body">
-        <p class="muted">התחברו עם אימייל וסיסמה, ואז לחצו «אני מגיע» למשחק הפתוח. עד 6 שחקנים במגרש, אחר כך ממתינים. אחרי ביט — סמנו ששילמתם.</p>
+        <p class="muted">התחברו עם אימייל וסיסמה, ואז לחצו «הרשמה» למשחק הפתוח. עד 6 שחקנים במגרש, אחר כך ממתינים. אחרי ביט — סמנו ששילמתם.</p>
         <ul class="rules">
           <li>הרשמה לראשון: מיום חמישי 21:30</li>
           <li>הרשמה לרביעי: מיום שני 21:30</li>
@@ -149,6 +153,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=21"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=22"></script>
 </body>
 </html>
