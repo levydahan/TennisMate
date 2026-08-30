@@ -30,6 +30,7 @@ from schedule import (
     SLOTS,
     TZ,
     banner_should_flash,
+    banner_target,
     draw_teams,
     draw_rematch,
     format_dt_he,
@@ -283,11 +284,35 @@ def name_taken(name: str, exclude_id: int | None = None) -> bool:
     return False
 
 
-def unpaid_debt(user: User | None) -> dict | None:
-    """Ended roster game that the player never marked paid."""
+def pay_warning_text(debt: dict | None) -> str | None:
+    """One Hebrew nag, including the unpaid game's date."""
+    if not debt:
+        return None
+    try:
+        day = date.fromisoformat(debt["week_key"])
+        date_he = day.strftime("%d.%m.%Y")
+    except (KeyError, ValueError):
+        date_he = ""
+    label = debt.get("label_he") or SLOTS.get(debt.get("slot"), {}).get("label_he", "")
+    when = f"{label} {date_he}".strip()
+    if when:
+        return f"הלו הלו לא שילמת למשחק של {when} תשלם עכשיו"
+    return PAY_WARNING
+
+
+def unpaid_debt(user: User | None, now: datetime | None = None) -> dict | None:
+    """Roster seat on a fully ended game that the player never marked paid.
+
+    Waitlist, games that have not started, and games still in progress
+    (20:00–22:01 Israel) never produce a nag.
+    """
     if not user:
         return None
-    now = now_il()
+    now = now_il() if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=TZ)
+    else:
+        now = now.astimezone(TZ)
     rows = Enrollment.query.filter_by(is_waitlist=False, paid=False, user_id=user.id).all()
     if not rows:
         _, name_key = normalize_name(user.name)
@@ -299,12 +324,17 @@ def unpaid_debt(user: User | None) -> dict | None:
         ).all()
     debts = []
     for row in rows:
+        if row.is_waitlist or row.paid:
+            continue
         try:
             game_date = date.fromisoformat(row.week_key)
         except ValueError:
             continue
+        start_dt = datetime.combine(game_date, GAME_TIME, tzinfo=TZ)
         end_dt = datetime.combine(game_date, GAME_END_TIME, tzinfo=TZ)
         if now < end_dt:
+            continue
+        if now < start_dt:
             continue
         n = Enrollment.query.filter_by(slot=row.slot, week_key=row.week_key, is_waitlist=False).count()
         share = round(FIELD_COST_NIS / n, 2) if n else None
@@ -318,7 +348,7 @@ def unpaid_debt(user: User | None) -> dict | None:
         })
     if not debts:
         return None
-    debts.sort(key=lambda item: item["week_key"])
+    debts.sort(key=lambda item: item["week_key"], reverse=True)
     return debts[0]
 
 
@@ -809,18 +839,26 @@ def public_state() -> dict:
             ended_games.append(ended_game_payload(slot, prev, me))
     upcoming_games.sort(key=lambda game: game["game_at"])
     ended_games.sort(key=lambda game: game["game_at"], reverse=True)
+    if debt:
+        have = {(game["slot"], game["week_key"]) for game in upcoming_games + ended_games}
+        if (debt["slot"], debt["week_key"]) not in have:
+            ended_games.append(ended_game_payload(debt["slot"], debt["week_key"], me))
+            ended_games.sort(key=lambda game: game["game_at"], reverse=True)
     nxt = next_pay_reminder_at()
     hour_before = next_hour_before_at()
     match_at = todays_match_game_at()
     upcoming = next_game_at()
+    target = banner_target()
+    warning = pay_warning_text(debt)
     return {
         "now": now_il().isoformat(),
         "is_admin": bool(session.get("is_admin")),
         "user": serialize_user(me),
         "unpaid": debt,
-        "pay_warning": PAY_WARNING if debt else None,
+        "pay_warning": warning,
         "persistent": PERSISTENT_DB,
-        "games": upcoming_games + ended_games,
+        "games": upcoming_games,
+        "past_games": ended_games,
         "players": FIXED_PLAYERS,
         "stats": attendance_stats(),
         "vapid_public_key": vapid_public_key(),
@@ -830,6 +868,11 @@ def public_state() -> dict:
         "hour_before_at_he": format_dt_he(hour_before),
         "is_match_day": is_match_day(),
         "banner_flash": banner_should_flash(),
+        "banner_mode": target["mode"],
+        "banner_at": target["at"],
+        "banner_at_he": target["at_he"],
+        "banner_label_he": target["label_he"],
+        "banner_game_at_he": target["game_at_he"],
         "match_game_at": match_at.isoformat() if match_at else None,
         "next_game_at": upcoming.isoformat(),
         "next_game_at_he": format_dt_he(upcoming),
@@ -979,8 +1022,9 @@ def api_join():
         if not is_admin:
             debt = unpaid_debt(user)
             if debt:
+                warning = pay_warning_text(debt)
                 payload = public_state()
-                payload.update({"ok": False, "message": PAY_WARNING, "pay_warning": PAY_WARNING})
+                payload.update({"ok": False, "message": warning, "pay_warning": warning})
                 return jsonify(payload), 400
     elif is_admin:
         name = canonical_player(data.get("name") or "") or " ".join(str(data.get("name") or "").split())

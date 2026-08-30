@@ -35,7 +35,11 @@ class JoinAndWaitlistTests(unittest.TestCase):
         self.assertTrue(res.get_json()["ok"])
 
     def _game(self, data, slot="sunday", ended=False):
-        for game in data["games"]:
+        pool = list(data.get("past_games") or []) if ended else list(data.get("games") or [])
+        for game in pool:
+            if game["slot"] == slot and bool(game.get("is_ended")) == ended:
+                return game
+        for game in list(data.get("games") or []) + list(data.get("past_games") or []):
             if game["slot"] == slot and bool(game.get("is_ended")) == ended:
                 return game
         return None
@@ -149,18 +153,91 @@ class JoinAndWaitlistTests(unittest.TestCase):
             ))
             db.session.commit()
             enrollment_id = Enrollment.query.filter_by(week_key="2020-01-05").first().id
+        warning = "הלו הלו לא שילמת למשחק של יום ראשון 05.01.2020 תשלם עכשיו"
         state = self.client.get("/api/state").get_json()
-        self.assertEqual(state["pay_warning"], "הלו הלו לא שילמת למשחקת תשלם עכשיו")
+        self.assertEqual(state["pay_warning"], warning)
         self.assertEqual(state["unpaid"]["enrollment_id"], enrollment_id)
+        self.assertTrue(any(
+            game["week_key"] == "2020-01-05" for game in state["past_games"]
+        ))
+        self.assertTrue(all(not game.get("is_ended") for game in state["games"]))
         blocked = self.client.post("/api/join", json={"slot": "sunday"})
         self.assertEqual(blocked.status_code, 400)
-        self.assertEqual(blocked.get_json()["message"], "הלו הלו לא שילמת למשחקת תשלם עכשיו")
+        self.assertEqual(blocked.get_json()["message"], warning)
         paid = self.client.post("/api/me/paid", json={"id": enrollment_id})
         self.assertTrue(paid.get_json()["ok"])
         self.assertIsNone(paid.get_json()["unpaid"])
         self.assertIsNone(paid.get_json()["pay_warning"])
 
-    def test_ended_game_card_goes_to_bottom(self):
+    def test_waitlist_and_open_game_do_not_nag(self):
+        from datetime import datetime
+        from app import User, unpaid_debt
+        from schedule import TZ, get_slot_state
+
+        created = self.client.post("/api/register", json={
+            "email": "levi@example.com",
+            "password": "secret1",
+            "name": "לוי",
+        })
+        user_id = created.get_json()["user"]["id"]
+        current = get_slot_state("sunday")["week_key"]
+        with app.app_context():
+            db.session.add(Enrollment(
+                slot="sunday",
+                week_key=current,
+                name="לוי",
+                name_key="לוי",
+                user_id=user_id,
+                is_waitlist=False,
+                paid=False,
+            ))
+            db.session.add(Enrollment(
+                slot="sunday",
+                week_key="2020-01-05",
+                name="לוי",
+                name_key="לוי",
+                user_id=user_id,
+                is_waitlist=True,
+                paid=False,
+            ))
+            db.session.commit()
+            user = db.session.get(User, user_id)
+            self.assertIsNone(unpaid_debt(user))
+            self.assertIsNone(unpaid_debt(user, datetime(2026, 8, 30, 21, 0, tzinfo=TZ)))
+        state = self.client.get("/api/state").get_json()
+        self.assertIsNone(state["unpaid"])
+        self.assertIsNone(state["pay_warning"])
+
+    def test_unpaid_only_after_game_ended(self):
+        from datetime import datetime
+        from app import User, unpaid_debt
+        from schedule import TZ
+
+        created = self.client.post("/api/register", json={
+            "email": "levi@example.com",
+            "password": "secret1",
+            "name": "לוי",
+        })
+        user_id = created.get_json()["user"]["id"]
+        with app.app_context():
+            db.session.add(Enrollment(
+                slot="sunday",
+                week_key="2026-08-30",
+                name="לוי",
+                name_key="לוי",
+                user_id=user_id,
+                is_waitlist=False,
+                paid=False,
+            ))
+            db.session.commit()
+            user = db.session.get(User, user_id)
+            self.assertIsNone(unpaid_debt(user, datetime(2026, 8, 30, 19, 59, tzinfo=TZ)))
+            self.assertIsNone(unpaid_debt(user, datetime(2026, 8, 30, 21, 0, tzinfo=TZ)))
+            debt = unpaid_debt(user, datetime(2026, 8, 30, 22, 1, tzinfo=TZ))
+            self.assertIsNotNone(debt)
+            self.assertEqual(debt["week_key"], "2026-08-30")
+
+    def test_ended_games_go_to_past_games(self):
         from schedule import get_slot_state
         sunday = get_slot_state("sunday")
         prev = sunday.get("prev_week_key")
@@ -174,17 +251,15 @@ class JoinAndWaitlistTests(unittest.TestCase):
                 is_waitlist=False,
             ))
             db.session.commit()
-        games = self.client.get("/api/state").get_json()["games"]
-        ended = [game for game in games if game.get("is_ended")]
-        upcoming = [game for game in games if not game.get("is_ended")]
-        self.assertTrue(ended)
-        self.assertTrue(upcoming)
-        self.assertLess(
-            max(i for i, game in enumerate(games) if not game.get("is_ended")),
-            min(i for i, game in enumerate(games) if game.get("is_ended")),
-        )
-        self.assertEqual(ended[0]["status_he"], "המשחק הסתיים")
-        self.assertIn("לוי", [p["name"] for p in ended[0]["roster"]])
+        data = self.client.get("/api/state").get_json()
+        games = data["games"]
+        past = data["past_games"]
+        self.assertTrue(all(not game.get("is_ended") for game in games))
+        self.assertTrue(past)
+        self.assertTrue(all(game.get("is_ended") for game in past))
+        sunday_past = next(game for game in past if game["slot"] == "sunday")
+        self.assertEqual(sunday_past["status_he"], "המשחק הסתיים")
+        self.assertIn("לוי", [p["name"] for p in sunday_past["roster"]])
 
     def test_state_exposes_banner_flash(self):
         from schedule import banner_should_flash
@@ -192,6 +267,9 @@ class JoinAndWaitlistTests(unittest.TestCase):
         self.assertIn("banner_flash", data)
         self.assertEqual(data["banner_flash"], banner_should_flash())
         self.assertIn("next_game_at_he", data)
+        self.assertIn("banner_mode", data)
+        self.assertIn(data["banner_mode"], ("enroll", "game", "in_progress"))
+        self.assertIn("past_games", data)
 
     def test_public_cannot_remove_players(self):
         self._login_admin()

@@ -98,6 +98,37 @@ def banner_should_flash(now: datetime | None = None) -> bool:
     return now < datetime.combine(now.date(), GAME_END_TIME, tzinfo=TZ)
 
 
+def banner_target(now: datetime | None = None) -> dict:
+    """Yellow-banner target for the nearest upcoming game cycle.
+
+    Before that day's enrollment opens: count down to enroll start.
+    After enrollment is open: count down to kickoff (20:00).
+    During 20:00–22:01: the match is in progress.
+    After 22:01 the board rolls to the next cycle.
+    """
+    now = now_il() if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=TZ)
+    else:
+        now = now.astimezone(TZ)
+
+    upcoming = [get_slot_state(key, now) for key in SLOTS]
+    upcoming = [item for item in upcoming if not item["is_ended"]]
+    upcoming.sort(key=lambda item: item["game_at"])
+    target = upcoming[0]
+    base = {
+        "slot": target["slot"],
+        "label_he": target["label_he"],
+        "game_at": target["game_at"],
+        "game_at_he": target["game_at_he"],
+    }
+    if target["is_past"] and not target["is_ended"]:
+        return {**base, "mode": "in_progress", "at": target["game_at"], "at_he": target["game_at_he"]}
+    if target["is_open"]:
+        return {**base, "mode": "game", "at": target["game_at"], "at_he": target["game_at_he"]}
+    return {**base, "mode": "enroll", "at": target["open_at"], "at_he": target["open_at_he"]}
+
+
 def format_dt_he(dt: datetime) -> str:
     return f"{DAYS_HE[dt.weekday()]} {dt.strftime('%d.%m.%Y')} בשעה {dt.strftime('%H:%M')}"
 

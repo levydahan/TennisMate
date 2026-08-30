@@ -3,7 +3,7 @@ from datetime import datetime
 
 import random
 
-from schedule import TZ, banner_should_flash, draw_rematch, draw_teams, forbidden_pairs, get_slot_state
+from schedule import TZ, banner_should_flash, banner_target, draw_rematch, draw_teams, forbidden_pairs, get_slot_state
 
 
 class SundayEnrollmentTests(unittest.TestCase):
@@ -164,6 +164,33 @@ class MatchDayTests(unittest.TestCase):
         self.assertTrue(banner_should_flash(sunday_afternoon))
         self.assertFalse(banner_should_flash(sunday_after))
         self.assertFalse(banner_should_flash(friday))
+
+    def test_banner_counts_to_enroll_before_window(self):
+        now = datetime(2026, 8, 27, 12, 0, tzinfo=TZ)
+        target = banner_target(now)
+        self.assertEqual(target["mode"], "enroll")
+        self.assertEqual(target["label_he"], "יום ראשון")
+        self.assertIn("21:30", target["at_he"])
+
+    def test_banner_counts_to_kickoff_after_enroll_opens(self):
+        now = datetime(2026, 8, 27, 21, 30, tzinfo=TZ)
+        target = banner_target(now)
+        self.assertEqual(target["mode"], "game")
+        self.assertEqual(target["label_he"], "יום ראשון")
+        self.assertIn("20:00", target["at_he"])
+
+    def test_banner_in_progress_during_match(self):
+        now = datetime(2026, 8, 30, 20, 30, tzinfo=TZ)
+        target = banner_target(now)
+        self.assertEqual(target["mode"], "in_progress")
+        self.assertTrue(banner_should_flash(now))
+
+    def test_banner_after_2201_switches_to_next_enroll(self):
+        now = datetime(2026, 8, 30, 22, 1, tzinfo=TZ)
+        target = banner_target(now)
+        self.assertEqual(target["mode"], "enroll")
+        self.assertEqual(target["label_he"], "יום רביעי")
+        self.assertFalse(banner_should_flash(now))
 
     def test_hour_before_window(self):
         from reminders import hour_before_is_due

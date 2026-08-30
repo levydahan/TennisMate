@@ -1,4 +1,5 @@
 const gamesEl = document.getElementById("games");
+const pastGamesEl = document.getElementById("pastGames");
 const statsListsEl = document.getElementById("statsLists");
 const toastEl = document.getElementById("toast");
 const adminBtn = document.getElementById("adminBtn");
@@ -7,7 +8,7 @@ const adminForm = document.getElementById("adminForm");
 const adminCancel = document.getElementById("adminCancel");
 const adminPassword = document.getElementById("adminPassword");
 
-let state = { games: [], is_admin: false, stats: { games: 0, players: [] } };
+let state = { games: [], past_games: [], is_admin: false, stats: { games: 0, players: [] } };
 
 function showToast(message) {
   if (!message) return;
@@ -280,8 +281,8 @@ function renderJoin(game) {
   if (mine) {
     return `<p class="muted join-row">אתה רשום למשחק</p>`;
   }
-  if (state.unpaid) {
-    return `<p class="pay-warn join-row">${esc(state.pay_warning || "הלו הלו לא שילמת למשחקת תשלם עכשיו")}</p>`;
+  if (state.unpaid && !state.is_admin) {
+    return "";
   }
   if (game.is_open) {
     return `<div class="join-row"><button class="primary-btn" data-join="${game.slot}" type="button">הרשמה</button></div>`;
@@ -334,7 +335,7 @@ function renderGame(game) {
     : "";
 
   return `
-    <article class="game-card" data-slot="${game.slot}">
+    <article class="game-card" data-slot="${game.slot}" data-week-key="${esc(game.week_key || "")}">
       <div class="game-head">
         <div>
           <h3>${esc(game.label_he)}</h3>
@@ -485,11 +486,16 @@ function applyScreen() {
   const loggedIn = isPlayerLoggedIn();
   const appScreen = document.getElementById("appScreen");
   const banner = document.getElementById("matchBanner");
+  const payWarn = document.getElementById("payWarn");
   const page = document.querySelector(".page");
   if (appScreen) appScreen.hidden = !loggedIn;
   if (banner) banner.hidden = !loggedIn;
+  if (payWarn && !loggedIn) payWarn.hidden = true;
   document.body.classList.toggle("login-only", !loggedIn);
-  if (page) page.classList.toggle("login-only", !loggedIn);
+  if (page) {
+    page.classList.toggle("login-only", !loggedIn);
+    page.classList.toggle("has-unpaid-banner", loggedIn && Boolean(state.unpaid && state.pay_warning));
+  }
 }
 
 function tickCountdown() {
@@ -504,23 +510,35 @@ function tickCountdown() {
   banner.hidden = false;
   const flash = bannerShouldFlash();
   banner.classList.toggle("match-day", flash);
-  if (title) {
-    title.textContent = flash
-      ? "יום המשחק הגיע"
-      : `המשחק הבא · ${state.next_game_at_he || state.next_game_label_he || ""}`.trim();
-  }
-  if (matchInProgress()) {
+  const mode = state.banner_mode;
+  const label = state.banner_label_he || "";
+  const at = state.banner_at ? Date.parse(state.banner_at) : nextGameMs();
+
+  if (mode === "in_progress" || (mode !== "enroll" && matchInProgress())) {
+    if (title) title.textContent = "יום המשחק הגיע";
     el.textContent = "המשחק התחיל";
     return;
   }
-  const at = nextGameMs();
+
+  if (mode === "enroll") {
+    const left = at ? at - Date.now() : 0;
+    if (title) title.textContent = `ההרשמה למשחק של ${label}`;
+    el.textContent = left <= 0 ? "ההרשמה נפתחה" : `תתחיל בעוד ${formatCountdown(left)}`;
+    return;
+  }
+
+  if (title) {
+    title.textContent = flash
+      ? "יום המשחק הגיע"
+      : `המשחק הבא · ${state.banner_game_at_he || state.next_game_at_he || label}`.trim();
+  }
   if (!at) {
-    el.textContent = state.next_game_at_he || "";
+    el.textContent = state.banner_game_at_he || state.next_game_at_he || "";
     return;
   }
   const left = at - Date.now();
   el.textContent = left <= 0
-    ? (state.next_game_at_he || "המשחק הבא")
+    ? (state.banner_game_at_he || "המשחק הבא")
     : `מתחילים בעוד ${formatCountdown(left)}`;
 }
 
@@ -532,17 +550,20 @@ function renderAuth() {
   const loggedOut = document.getElementById("authLoggedOut");
   const loggedIn = document.getElementById("authLoggedIn");
   const hello = document.getElementById("authHello");
+  const authCard = document.getElementById("authCard");
   const payWarn = document.getElementById("payWarn");
   if (state.user) {
     if (loggedOut) loggedOut.hidden = true;
     if (loggedIn) loggedIn.hidden = false;
+    if (authCard) authCard.hidden = true;
     if (hello) hello.textContent = state.user.name;
   } else {
     if (loggedOut) loggedOut.hidden = false;
     if (loggedIn) loggedIn.hidden = true;
+    if (authCard) authCard.hidden = false;
   }
   if (payWarn) {
-    if (state.unpaid && state.pay_warning) {
+    if (state.user && state.unpaid && state.pay_warning) {
       payWarn.hidden = false;
       payWarn.textContent = state.pay_warning;
     } else {
@@ -566,13 +587,21 @@ function render() {
   }
   if (!isPlayerLoggedIn()) {
     if (gamesEl) gamesEl.innerHTML = "";
+    if (pastGamesEl) pastGamesEl.innerHTML = "";
     if (statsListsEl) statsListsEl.innerHTML = "";
     return;
   }
   const warn = state.is_admin && state.persistent === false
     ? `<p class="persist-warn">כדי שהרשימות לא יימחקו בעדכון ב-Render, חברו מסד PostgreSQL והגדירו DATABASE_URL.</p>`
     : "";
-  gamesEl.innerHTML = warn + state.games.map(renderGame).join("");
+  const upcoming = (state.games || []).filter((game) => !game.is_ended);
+  const past = state.past_games || (state.games || []).filter((game) => game.is_ended);
+  gamesEl.innerHTML = warn + upcoming.map(renderGame).join("");
+  if (pastGamesEl) {
+    pastGamesEl.innerHTML = past.length
+      ? past.map(renderGame).join("")
+      : `<p class="muted">אין משחקים שהסתיימו עדיין.</p>`;
+  }
   renderStats();
 }
 
@@ -587,7 +616,7 @@ async function refresh() {
   applyState(data);
 }
 
-gamesEl.addEventListener("click", async (e) => {
+async function onGameListClick(e) {
   const foldBtn = e.target.closest("[data-fold-toggle]");
   if (foldBtn) {
     const wrap = foldBtn.closest(".game-fold");
@@ -653,9 +682,9 @@ gamesEl.addEventListener("click", async (e) => {
     const data = await api("/api/admin/clear", { slot: clearBtn.dataset.clear });
     applyState(data);
   }
-});
+}
 
-gamesEl.addEventListener("change", async (e) => {
+async function onGameListChange(e) {
   const select = e.target.closest("[data-booker]");
   if (select) {
     const playerId = select.value ? Number(select.value) : null;
@@ -667,7 +696,16 @@ gamesEl.addEventListener("change", async (e) => {
   if (!box) return;
   const data = await api("/api/admin/paid", { id: Number(box.dataset.paid), paid: box.checked });
   applyState(data);
-});
+}
+
+if (gamesEl) {
+  gamesEl.addEventListener("click", onGameListClick);
+  gamesEl.addEventListener("change", onGameListChange);
+}
+if (pastGamesEl) {
+  pastGamesEl.addEventListener("click", onGameListClick);
+  pastGamesEl.addEventListener("change", onGameListChange);
+}
 
 statsListsEl.addEventListener("click", async (e) => {
   const payBtn = e.target.closest("[data-pay-reminder]");
@@ -958,12 +996,68 @@ function initStatsToggle() {
   });
 }
 
+const PAST_GAMES_COLLAPSE_KEY = "tm-past-collapsed";
+
+function applyPastGamesCollapsed(collapsed) {
+  const card = document.getElementById("pastGamesSection");
+  const btn = document.getElementById("pastGamesToggle");
+  const action = btn && btn.querySelector(".hero-toggle-action");
+  if (!card || !btn) return;
+  card.classList.toggle("collapsed", collapsed);
+  btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  if (action) action.textContent = collapsed ? "הרחב" : "מזער";
+}
+
+function initPastGamesToggle() {
+  const btn = document.getElementById("pastGamesToggle");
+  if (!btn) return;
+  let collapsed = true;
+  try {
+    collapsed = localStorage.getItem(PAST_GAMES_COLLAPSE_KEY) !== "0";
+  } catch (e) {}
+  applyPastGamesCollapsed(collapsed);
+  btn.addEventListener("click", () => {
+    const next = !document.getElementById("pastGamesSection").classList.contains("collapsed");
+    applyPastGamesCollapsed(next);
+    try {
+      localStorage.setItem(PAST_GAMES_COLLAPSE_KEY, next ? "1" : "0");
+    } catch (e) {}
+  });
+}
+
+function expandPastGames() {
+  applyPastGamesCollapsed(false);
+  try {
+    localStorage.setItem(PAST_GAMES_COLLAPSE_KEY, "0");
+  } catch (e) {}
+}
+
+function scrollToUnpaidGame() {
+  const debt = state.unpaid;
+  if (!debt) return;
+  expandPastGames();
+  const jump = () => {
+    const card = document.querySelector(
+      `.game-card[data-slot="${debt.slot}"][data-week-key="${debt.week_key}"]`
+    );
+    if (!card) return;
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
+    card.classList.add("highlight-unpaid");
+    clearTimeout(scrollToUnpaidGame._t);
+    scrollToUnpaidGame._t = setTimeout(() => card.classList.remove("highlight-unpaid"), 2200);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(jump));
+}
+
 const notifyBtn = document.getElementById("notifyBtn");
 if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
 
 initAuth();
 initHeroToggle();
 initStatsToggle();
+initPastGamesToggle();
+const payWarnBtn = document.getElementById("payWarn");
+if (payWarnBtn) payWarnBtn.addEventListener("click", scrollToUnpaidGame);
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
