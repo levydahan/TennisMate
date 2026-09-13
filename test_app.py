@@ -75,6 +75,55 @@ class JoinAndWaitlistTests(unittest.TestCase):
         self.assertEqual(res.status_code, 401)
         self.assertFalse(res.get_json()["ok"])
 
+    def test_player_can_leave_own_enrollment(self):
+        created = self.client.post("/api/register", json={
+            "email": "leave@example.com",
+            "password": "secret1",
+            "name": "עזיבה",
+        })
+        self.assertTrue(created.get_json()["ok"], created.get_json())
+        self.client.post("/api/logout", json={})
+        denied = self.client.post("/api/leave", json={"slot": "sunday"})
+        self.assertEqual(denied.status_code, 401)
+        self.client.post("/api/login", json={
+            "email": "leave@example.com",
+            "password": "secret1",
+        })
+        missing = self.client.post("/api/leave", json={"slot": "sunday"})
+        self.assertEqual(missing.status_code, 400)
+        joined = self.client.post("/api/join", json={"slot": "sunday"})
+        data = joined.get_json()
+        self.assertTrue(data["ok"], data)
+        sunday = self._game(data, "sunday")
+        self.assertTrue(any(p.get("is_me") for p in sunday["roster"] + sunday["waiting"]))
+        left = self.client.post("/api/leave", json={"slot": "sunday"})
+        left_data = left.get_json()
+        self.assertTrue(left_data["ok"], left_data)
+        sunday = self._game(left_data, "sunday")
+        self.assertFalse(any(p.get("is_me") for p in sunday["roster"] + sunday["waiting"]))
+
+    def test_player_can_upload_and_clear_avatar(self):
+        self.client.post("/api/register", json={
+            "email": "photo@example.com",
+            "password": "secret1",
+            "name": "תמונה",
+        })
+        tiny = (
+            "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+            "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+            "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDAREAAhEBAxEB/8QAFQABAQAA"
+            "AAAAAAAAAAAAAAAABv/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKwD/2Q=="
+        )
+        denied = self.client.post("/api/me/avatar", json={"image": "not-an-image"})
+        self.assertEqual(denied.status_code, 400)
+        uploaded = self.client.post("/api/me/avatar", json={"image": tiny})
+        data = uploaded.get_json()
+        self.assertTrue(data["ok"], data)
+        self.assertTrue(data["user"]["avatar"].startswith("data:image/jpeg"))
+        cleared = self.client.post("/api/me/avatar", json={"image": ""})
+        self.assertTrue(cleared.get_json()["ok"])
+        self.assertIsNone(cleared.get_json()["user"]["avatar"])
+
     def test_register_login_and_reset_password(self):
         created = self.client.post("/api/register", json={
             "email": "levi@example.com",

@@ -6,7 +6,7 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
-from flask import Flask, jsonify, render_template, request, send_from_directory, session
+from flask import Flask, g, jsonify, render_template, request, send_from_directory, session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
@@ -87,6 +87,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=60)
+app.config["MAX_CONTENT_LENGTH"] = 400 * 1024
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "0508716669")
 PAY_WARNING = "הלו הלו לא שילמת למשחקת תשלם עכשיו"
@@ -125,6 +126,7 @@ class User(db.Model):
     email = db.Column(db.String(120), nullable=False, unique=True)
     password_hash = db.Column(db.String(255), nullable=False)
     name = db.Column(db.String(80), nullable=False)
+    avatar = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
@@ -219,6 +221,11 @@ def _ensure_schema():
                 conn.execute(text("ALTER TABLE game_settings ADD COLUMN teams2_json TEXT"))
             if "teams2_ids" not in columns:
                 conn.execute(text("ALTER TABLE game_settings ADD COLUMN teams2_ids VARCHAR(200)"))
+    if "users" in inspector.get_table_names():
+        columns = {col["name"] for col in inspector.get_columns("users")}
+        if "avatar" not in columns:
+            with db.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN avatar TEXT"))
 
 
 # Do not block gunicorn import on Postgres. Render marks the deploy failed if
@@ -266,7 +273,7 @@ def current_user() -> User | None:
 def serialize_user(user: User | None) -> dict | None:
     if not user:
         return None
-    return {"id": user.id, "email": user.email, "name": user.name}
+    return {"id": user.id, "email": user.email, "name": user.name, "avatar": user.avatar}
 
 
 def login_user(user: User) -> None:
@@ -672,6 +679,19 @@ def history_for_slot(slot: str, current_week_key: str, exclude: str | None = Non
     return history
 
 
+def avatar_map() -> dict[int, str]:
+    cached = getattr(g, "avatar_map", None)
+    if cached is not None:
+        return cached
+    mapping = {
+        user.id: user.avatar
+        for user in User.query.filter(User.avatar.isnot(None)).all()
+        if user.avatar
+    }
+    g.avatar_map = mapping
+    return mapping
+
+
 def serialize_player(row: Enrollment, me: User | None = None) -> dict:
     is_me = bool(me and owns_enrollment(row, me))
     return {
@@ -681,6 +701,7 @@ def serialize_player(row: Enrollment, me: User | None = None) -> dict:
         "paid": row.paid,
         "user_id": row.user_id,
         "is_me": is_me,
+        "avatar": avatar_map().get(row.user_id) if row.user_id else None,
         "joined_at": row.joined_at.isoformat() if row.joined_at else None,
     }
 
@@ -1068,6 +1089,34 @@ def api_me_paid():
     return jsonify(payload)
 
 
+AVATAR_PREFIXES = ("data:image/jpeg;base64,", "data:image/png;base64,", "data:image/webp;base64,")
+AVATAR_MAX_CHARS = 80_000
+
+
+@app.post("/api/me/avatar")
+def api_me_avatar():
+    user = current_user()
+    if not user:
+        return jsonify({"ok": False, "message": "יש להתחבר"}), 401
+    data = request.get_json(silent=True) or {}
+    image = data.get("image")
+    if image in (None, ""):
+        user.avatar = None
+        db.session.commit()
+        payload = public_state()
+        payload.update({"ok": True, "message": "התמונה הוסרה"})
+        return jsonify(payload)
+    if not isinstance(image, str) or not image.startswith(AVATAR_PREFIXES):
+        return jsonify({"ok": False, "message": "יש להעלות תמונת jpg או png"}), 400
+    if len(image) > AVATAR_MAX_CHARS:
+        return jsonify({"ok": False, "message": "התמונה גדולה מדי"}), 400
+    user.avatar = image
+    db.session.commit()
+    payload = public_state()
+    payload.update({"ok": True, "message": "התמונה עודכנה"})
+    return jsonify(payload)
+
+
 @app.post("/api/join")
 def api_join():
     data = request.get_json(silent=True) or {}
@@ -1139,6 +1188,41 @@ def api_join():
 
     payload = public_state()
     payload.update({"ok": True, "message": message, "waitlisted": waitlisted})
+    return jsonify(payload)
+
+
+@app.post("/api/leave")
+def api_leave():
+    user = current_user()
+    if not user:
+        return jsonify({"ok": False, "message": "יש להתחבר"}), 401
+    data = request.get_json(silent=True) or {}
+    slot = (data.get("slot") or "").strip()
+    if slot not in ("sunday", "wednesday"):
+        return jsonify({"ok": False, "message": "משחק לא תקין"}), 400
+    state = sync_slot(slot)
+    if not state["is_open"]:
+        return jsonify({"ok": False, "message": "אפשר לבטל הרשמה רק כשההרשמה פתוחה"}), 400
+    rows = Enrollment.query.filter_by(slot=slot, week_key=state["week_key"]).all()
+    row = next((item for item in rows if owns_enrollment(item, user)), None)
+    if not row:
+        return jsonify({"ok": False, "message": "אתה לא רשום למשחק"}), 400
+    was_waitlist = row.is_waitlist
+    name = row.name
+    settings = GameSettings.query.filter_by(slot=slot, week_key=state["week_key"]).first()
+    if settings and settings.booker_id == row.id:
+        settings.booker_id = None
+    db.session.delete(row)
+    db.session.flush()
+    promoted = None
+    if not was_waitlist:
+        promoted = _promote_first_waitlisted(slot, state["week_key"])
+    db.session.commit()
+    message = "ההרשמה בוטלה"
+    if promoted:
+        message += f" · {promoted} עלה מההמתנה"
+    payload = public_state()
+    payload.update({"ok": True, "message": message})
     return jsonify(payload)
 
 

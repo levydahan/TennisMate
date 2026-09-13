@@ -78,7 +78,9 @@ function renderPlayerRow(player, index, { waitlist = false, admin = false, game 
   return `
     <li>
       <div class="row-main">
-        <span class="num">${index + 1}</span>
+        ${player.avatar
+          ? `<img class="row-avatar" src="${esc(player.avatar)}" alt="" />`
+          : `<span class="num">${index + 1}</span>`}
         <span class="name">${esc(player.name)}</span>
       </div>
       <div class="row-actions">${actions.join("")}</div>
@@ -275,14 +277,25 @@ function statusLabel(status) {
   return "לא הגיע";
 }
 
+function myEnrollment(game) {
+  if (!game) return null;
+  return [...(game.roster || []), ...(game.waiting || [])].find((player) => player.is_me) || null;
+}
+
 function renderJoin(game) {
   if (game.is_ended) return "";
   if (!state.user) {
     return game.is_open ? `<p class="muted join-row">התחברו כדי להירשם למשחק</p>` : "";
   }
-  const mine = [...(game.roster || []), ...(game.waiting || [])].some((p) => p.is_me);
+  const mine = myEnrollment(game);
   if (mine) {
-    return `<p class="muted join-row">אתה רשום למשחק</p>`;
+    const note = mine.is_waitlist || (game.waiting || []).some((p) => p.is_me)
+      ? "אתה ברשימת ההמתנה"
+      : "אתה רשום למשחק";
+    const cancel = game.is_open
+      ? `<button class="leave-btn danger-btn" data-leave="${game.slot}" type="button">ביטול הרשמה</button>`
+      : "";
+    return `<div class="join-row"><p class="muted">${note}</p>${cancel}</div>`;
   }
   if (state.unpaid && !state.is_admin) {
     return "";
@@ -357,7 +370,6 @@ function renderGame(game) {
       ${renderJoin(game)}
       ${renderFieldFold(game)}
       ${renderTeamsFold(game)}
-      ${renderHistory(game)}
       ${state.is_admin ? `<div class="admin-tools"><button class="tiny-btn danger" data-clear="${game.slot}" type="button">ניקוי רשימה</button></div>` : ""}
     </article>
   `;
@@ -609,20 +621,41 @@ function renderHome() {
   if (!homeViewEl) return;
   const name = state.user ? state.user.name : "";
   const mine = state.my_stats || {};
+  const game = matchDayGame() || nextUpcomingGame();
+  const enrolled = Boolean(myEnrollment(game));
   const open = enrollmentIsOpen();
   const notifyOn = localStorage.getItem("tm-notify") === "1";
+  let cta = "";
+  if (enrolled) {
+    cta = `<button class="primary-btn" data-go-tab="match" type="button">למשחק של היום</button>`;
+  } else if (open) {
+    cta = `<button class="primary-btn" data-go-tab="enroll" type="button">להרשמה למשחק</button>`;
+  }
+  const photo = state.user && state.user.avatar;
+  const initial = (name || "?").trim().slice(0, 1);
   homeViewEl.innerHTML = `
     <section class="welcome-card">
       <p class="kicker">ראשי</p>
-      <h2>שלום ${esc(name)}</h2>
-      <p class="muted">ברוך הבא לטניסמייט. משחקים ביום ראשון ויום רביעי ב־20:00.</p>
+      <div class="profile-row">
+        <label class="avatar-upload">
+          ${photo
+            ? `<img class="avatar-img" src="${esc(photo)}" alt="" />`
+            : `<span class="avatar-fallback">${esc(initial)}</span>`}
+          <input id="avatarInput" type="file" accept="image/*" />
+          <span class="avatar-action">${photo ? "החלפת תמונה" : "הוספת תמונה"}</span>
+        </label>
+        <div>
+          <h2>שלום ${esc(name)}</h2>
+          <p class="muted">ברוך הבא לטניסמייט. משחקים ביום ראשון ויום רביעי ב־20:00.</p>
+        </div>
+      </div>
       <ul class="welcome-stats">
         <li><strong>${mine.arrived || 0}</strong><span>משחקים שהגעת</span></li>
         <li><strong>${mine.missed || 0}</strong><span>משחקים שפספסת</span></li>
         <li><strong>${formatMoney(mine.paid_total)} ₪</strong><span>שולם על טניס</span></li>
         <li><strong>${mine.booked || 0}</strong><span>הזמנות מגרש</span></li>
       </ul>
-      ${open ? `<button class="primary-btn" data-go-tab="enroll" type="button">להרשמה למשחק</button>` : ""}
+      ${cta}
       <button id="notifyBtn" class="ghost-btn notify-btn" type="button">${
         notifyOn ? "תזכורות תשלום פעילות" : "הפעלת תזכורת תשלום"
       }</button>
@@ -630,6 +663,50 @@ function renderHome() {
   `;
   const notifyBtn = document.getElementById("notifyBtn");
   if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
+  const avatarInput = document.getElementById("avatarInput");
+  if (avatarInput) avatarInput.addEventListener("change", onAvatarPicked);
+}
+
+function resizeAvatar(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith("image/")) {
+      reject(new Error("יש לבחור תמונה"));
+      return;
+    }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const size = 192;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      const side = Math.min(img.width, img.height);
+      const sx = (img.width - side) / 2;
+      const sy = (img.height - side) / 2;
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", 0.72));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("לא הצלחנו לקרוא את התמונה"));
+    };
+    img.src = url;
+  });
+}
+
+async function onAvatarPicked(e) {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    const image = await resizeAvatar(file);
+    const data = await api("/api/me/avatar", { image });
+    applyState(data);
+  } catch (err) {
+    showToast(err.message || "העלאת התמונה נכשלה");
+  }
 }
 
 function renderMatchDay() {
@@ -675,6 +752,7 @@ function renderMatchDay() {
         <span class="status ${game.is_ended ? "ended" : game.is_past ? "past" : "closed"}">${esc(game.status_he)}</span>
       </div>
       <p id="matchDayCountdown" class="match-day-count">${esc(matchCountdownText(game))}</p>
+      ${renderJoin(game)}
       <div class="match-day-block">
         <h4>שחקנים מגיעים</h4>
         <ul class="player-list">${rosterHtml}</ul>
@@ -704,6 +782,7 @@ function renderAuth() {
   const loggedOut = document.getElementById("authLoggedOut");
   const loggedIn = document.getElementById("authLoggedIn");
   const hello = document.getElementById("authHello");
+  const helloAvatar = document.getElementById("helloAvatar");
   const authCard = document.getElementById("authCard");
   const payWarn = document.getElementById("payWarn");
   if (state.user) {
@@ -711,6 +790,15 @@ function renderAuth() {
     if (loggedIn) loggedIn.hidden = false;
     if (authCard) authCard.hidden = true;
     if (hello) hello.textContent = state.user.name;
+    if (helloAvatar) {
+      if (state.user.avatar) {
+        helloAvatar.hidden = false;
+        helloAvatar.src = state.user.avatar;
+      } else {
+        helloAvatar.hidden = true;
+        helloAvatar.removeAttribute("src");
+      }
+    }
   } else {
     if (loggedOut) loggedOut.hidden = false;
     if (loggedIn) loggedIn.hidden = true;
@@ -792,6 +880,14 @@ async function onGameListClick(e) {
   if (joinBtn) {
     joinBtn.disabled = true;
     const data = await api("/api/join", { slot: joinBtn.dataset.join });
+    applyState(data);
+    return;
+  }
+  const leaveBtn = e.target.closest("[data-leave]");
+  if (leaveBtn) {
+    if (!confirm("לבטל את ההרשמה למשחק?")) return;
+    leaveBtn.disabled = true;
+    const data = await api("/api/leave", { slot: leaveBtn.dataset.leave });
     applyState(data);
     return;
   }

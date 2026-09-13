@@ -158,6 +158,79 @@ body.login-only .top-banners {
   display: none !important;
 }
 
+.hello-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+  background: #14532d;
+}
+
+.hello-avatar[hidden] {
+  display: none !important;
+}
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.profile-row h2 {
+  margin-bottom: 4px;
+}
+
+.profile-row .muted {
+  margin-bottom: 0;
+}
+
+.avatar-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  cursor: pointer;
+}
+
+.avatar-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.avatar-img, .avatar-fallback {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+  background: #14532d;
+  color: #fef08a;
+  font-size: 1.6rem;
+  font-weight: 800;
+  box-shadow: 0 0 0 3px #bbf7d0;
+}
+
+.avatar-action {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #15803d;
+}
+
+.row-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+
 .hello-line strong {
   font-weight: 800;
 }
@@ -673,14 +746,18 @@ body.login-only .top-banners {
   gap: 8px;
   padding: 12px;
   border-radius: 16px;
-  background: #f0fdf4;
+  background: #f8faf4;
+  color: #14532d;
   margin-bottom: 10px;
   font-weight: 800;
 }
 
 .stats-name {
-  font-size: 1.05rem;
-  line-height: 1.2;
+  display: block;
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1.25;
+  color: #052e16;
 }
 
 .stats-graphs {
@@ -958,6 +1035,8 @@ body.login-only .top-banners {
 }
 
 .join-row { margin: 12px 0 4px; }
+.join-row .muted { margin-bottom: 8px; }
+.welcome-card .primary-btn { width: 100%; }
 
 .me-paid-btn {
   font: inherit;
