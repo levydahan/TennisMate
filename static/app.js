@@ -1,6 +1,9 @@
 const gamesEl = document.getElementById("games");
 const pastGamesEl = document.getElementById("pastGames");
 const statsListsEl = document.getElementById("statsLists");
+const homeViewEl = document.getElementById("homeView");
+const matchDayViewEl = document.getElementById("matchDayView");
+const appTabsEl = document.getElementById("appTabs");
 const toastEl = document.getElementById("toast");
 const adminBtn = document.getElementById("adminBtn");
 const adminDialog = document.getElementById("adminDialog");
@@ -431,12 +434,79 @@ function renderStats() {
   `;
 }
 
+function upcomingGames() {
+  return (state.games || [])
+    .filter((game) => !game.is_ended)
+    .slice()
+    .sort((a, b) => Date.parse(a.game_at) - Date.parse(b.game_at));
+}
+
+function nextUpcomingGame() {
+  return upcomingGames()[0] || null;
+}
+
+function enrollmentIsOpen() {
+  if (state.enrollment_open === true) return true;
+  return upcomingGames().some((game) => game.is_open);
+}
+
 function isMatchDay() {
   if (state.banner_flash === false) return false;
   if (state.banner_flash === true) return true;
   if (state.is_match_day) return true;
   const local = location.hostname === "127.0.0.1" || location.hostname === "localhost";
   return local && new URLSearchParams(location.search).get("match_day") === "1";
+}
+
+function isActiveMatchDay() {
+  return isMatchDay();
+}
+
+let currentTab = null;
+
+function defaultTabId() {
+  return isActiveMatchDay() ? "match" : "home";
+}
+
+function setTab(tab, { scroll = true } = {}) {
+  currentTab = tab;
+  document.querySelectorAll(".tab-panel").forEach((el) => {
+    el.hidden = el.dataset.tab !== tab;
+  });
+  if (appTabsEl) {
+    appTabsEl.querySelectorAll("[data-tab]").forEach((btn) => {
+      const on = btn.dataset.tab === tab;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
+  try {
+    sessionStorage.setItem("tm-tab", tab);
+  } catch (e) {}
+  if (scroll) window.scrollTo(0, 0);
+}
+
+function resetLandingTab() {
+  currentTab = null;
+  try {
+    sessionStorage.removeItem("tm-tab");
+  } catch (e) {}
+}
+
+function ensureTab() {
+  if (!isPlayerLoggedIn()) {
+    currentTab = null;
+    return;
+  }
+  if (currentTab) {
+    setTab(currentTab, { scroll: false });
+    return;
+  }
+  let saved = null;
+  try {
+    saved = sessionStorage.getItem("tm-tab");
+  } catch (e) {}
+  setTab(saved || defaultTabId());
 }
 
 function bannerShouldFlash() {
@@ -489,7 +559,8 @@ function applyScreen() {
   const payWarn = document.getElementById("payWarn");
   const page = document.querySelector(".page");
   if (appScreen) appScreen.hidden = !loggedIn;
-  if (banner) banner.hidden = !loggedIn;
+  if (banner) banner.hidden = true;
+  if (appTabsEl) appTabsEl.hidden = !loggedIn;
   if (payWarn && !loggedIn) payWarn.hidden = true;
   document.body.classList.toggle("login-only", !loggedIn);
   if (page) {
@@ -498,48 +569,131 @@ function applyScreen() {
   }
 }
 
+function matchCountdownText(game) {
+  const start = game && game.game_at ? Date.parse(game.game_at) : nextGameMs();
+  if (!start) return "המשחק הבא";
+  if (game && game.is_past && !game.is_ended) return "המשחק התחיל";
+  const left = start - Date.now();
+  if (left <= 0) return "המשחק התחיל";
+  return `מתחילים בעוד ${formatCountdown(left)}`;
+}
+
 function tickCountdown() {
   const banner = document.getElementById("matchBanner");
-  const el = document.getElementById("matchCountdown");
-  const title = document.getElementById("matchBannerTitle");
-  if (!banner || !el) return;
-  if (!isPlayerLoggedIn()) {
-    banner.hidden = true;
-    return;
-  }
-  banner.hidden = false;
-  const flash = bannerShouldFlash();
-  banner.classList.toggle("match-day", flash);
-  const mode = state.banner_mode;
-  const label = state.banner_label_he || "";
-  const at = state.banner_at ? Date.parse(state.banner_at) : nextGameMs();
+  if (banner) banner.hidden = true;
+  const el = document.getElementById("matchDayCountdown");
+  if (!el) return;
+  el.textContent = matchCountdownText(matchDayGame());
+}
 
-  if (mode === "in_progress" || (mode !== "enroll" && matchInProgress())) {
-    if (title) title.textContent = "יום המשחק הגיע";
-    el.textContent = "המשחק התחיל";
-    return;
-  }
+function formatMoney(amount) {
+  if (amount == null) return "0";
+  return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
+}
 
-  if (mode === "enroll") {
-    const left = at ? at - Date.now() : 0;
-    if (title) title.textContent = `ההרשמה למשחק של ${label}`;
-    el.textContent = left <= 0 ? "ההרשמה נפתחה" : `תתחיל בעוד ${formatCountdown(left)}`;
-    return;
-  }
+function matchDayGame() {
+  const games = state.games || [];
+  const live = games.find((game) => game.is_past && !game.is_ended);
+  if (live) return live;
+  const now = new Date();
+  const today = games.find((game) => {
+    const start = new Date(game.game_at);
+    return start.getFullYear() === now.getFullYear()
+      && start.getMonth() === now.getMonth()
+      && start.getDate() === now.getDate();
+  });
+  return today || nextUpcomingGame();
+}
 
-  if (title) {
-    title.textContent = flash
-      ? "יום המשחק הגיע"
-      : `המשחק הבא · ${state.banner_game_at_he || state.next_game_at_he || label}`.trim();
-  }
-  if (!at) {
-    el.textContent = state.banner_game_at_he || state.next_game_at_he || "";
+function renderHome() {
+  if (!homeViewEl) return;
+  const name = state.user ? state.user.name : "";
+  const mine = state.my_stats || {};
+  const open = enrollmentIsOpen();
+  const notifyOn = localStorage.getItem("tm-notify") === "1";
+  homeViewEl.innerHTML = `
+    <section class="welcome-card">
+      <p class="kicker">ראשי</p>
+      <h2>שלום ${esc(name)}</h2>
+      <p class="muted">ברוך הבא לטניסמייט. משחקים ביום ראשון ויום רביעי ב־20:00.</p>
+      <ul class="welcome-stats">
+        <li><strong>${mine.arrived || 0}</strong><span>משחקים שהגעת</span></li>
+        <li><strong>${mine.missed || 0}</strong><span>משחקים שפספסת</span></li>
+        <li><strong>${formatMoney(mine.paid_total)} ₪</strong><span>שולם על טניס</span></li>
+        <li><strong>${mine.booked || 0}</strong><span>הזמנות מגרש</span></li>
+      </ul>
+      ${open ? `<button class="primary-btn" data-go-tab="enroll" type="button">להרשמה למשחק</button>` : ""}
+      <button id="notifyBtn" class="ghost-btn notify-btn" type="button">${
+        notifyOn ? "תזכורות תשלום פעילות" : "הפעלת תזכורת תשלום"
+      }</button>
+    </section>
+  `;
+  const notifyBtn = document.getElementById("notifyBtn");
+  if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
+}
+
+function renderMatchDay() {
+  if (!matchDayViewEl) return;
+  const game = matchDayGame();
+  if (!game) {
+    matchDayViewEl.innerHTML = `<section class="match-day-card"><h2>יום המשחק</h2><p class="muted">אין משחק קרוב להצגה.</p></section>`;
     return;
   }
-  const left = at - Date.now();
-  el.textContent = left <= 0
-    ? (state.banner_game_at_he || "המשחק הבא")
-    : `מתחילים בעוד ${formatCountdown(left)}`;
+  const emptySlots = Math.max(game.max_players - game.count, 0);
+  const rosterHtml = (game.roster || []).map((p, i) => renderPlayerRow(p, i, { admin: state.is_admin, game })).join("")
+    + Array.from({ length: emptySlots }, (_, i) => `
+        <li class="empty">
+          <div class="row-main">
+            <span class="num">${game.count + i + 1}</span>
+            <span>מקום פנוי</span>
+          </div>
+        </li>
+      `).join("");
+  const waitingHtml = (game.waiting || []).length
+    ? `<h4 class="wait-title">רשימת המתנה</h4>
+       <ul class="wait-list">${game.waiting.map((p, i) => renderPlayerRow(p, i, { waitlist: true, admin: state.is_admin })).join("")}</ul>`
+    : "";
+  const bookerSelect = game.is_ended
+    ? ""
+    : `
+      <label class="booker-label">מי יזמין את המגרש</label>
+      <select data-booker="${game.slot}">
+        <option value="">בחרו מי יזמין את המגרש</option>
+        ${(game.roster || []).map((p) => `
+          <option value="${p.id}" ${game.booker_id === p.id ? "selected" : ""}>${esc(p.name)}</option>
+        `).join("")}
+      </select>
+    `;
+  matchDayViewEl.innerHTML = `
+    <article class="game-card match-day-card" data-slot="${game.slot}" data-week-key="${esc(game.week_key || "")}">
+      <p class="kicker">יום המשחק</p>
+      <div class="game-head">
+        <div>
+          <h3>${esc(game.label_he)}</h3>
+          <p class="meta">${esc(game.game_at_he)}</p>
+        </div>
+        <span class="status ${game.is_ended ? "ended" : game.is_past ? "past" : "closed"}">${esc(game.status_he)}</span>
+      </div>
+      <p id="matchDayCountdown" class="match-day-count">${esc(matchCountdownText(game))}</p>
+      <div class="match-day-block">
+        <h4>שחקנים מגיעים</h4>
+        <ul class="player-list">${rosterHtml}</ul>
+        ${waitingHtml}
+      </div>
+      <div class="match-day-block">
+        <h4>מזמין המגרש</h4>
+        <p class="share">${costSplit(game)}</p>
+        ${bookerSelect}
+        ${game.booker_name
+          ? `<p class="booker-picked">המזמין: <strong>${esc(game.booker_name)}</strong></p>`
+          : `<p class="booker-picked muted">עדיין לא נבחר מזמין</p>`}
+      </div>
+      <div class="match-day-block">
+        <h4>הגרלת זוגות</h4>
+        ${renderTeams(game)}
+      </div>
+    </article>
+  `;
 }
 
 function renderMatchBanner() {
@@ -577,30 +731,24 @@ function render() {
   adminBtn.textContent = state.is_admin ? "יציאה ממנהל" : "מנהל";
   renderAuth();
   applyScreen();
-  renderMatchBanner();
-  const notifyBtn = document.getElementById("notifyBtn");
-  if (notifyBtn) {
-    notifyBtn.hidden = !("Notification" in window);
-    notifyBtn.textContent = localStorage.getItem("tm-notify") === "1"
-      ? "תזכורות תשלום פעילות"
-      : "הפעלת תזכורת תשלום";
-  }
   if (!isPlayerLoggedIn()) {
+    if (homeViewEl) homeViewEl.innerHTML = "";
+    if (matchDayViewEl) matchDayViewEl.innerHTML = "";
     if (gamesEl) gamesEl.innerHTML = "";
     if (pastGamesEl) pastGamesEl.innerHTML = "";
     if (statsListsEl) statsListsEl.innerHTML = "";
     return;
   }
+  ensureTab();
+  renderHome();
+  renderMatchDay();
+  renderMatchBanner();
   const warn = state.is_admin && state.persistent === false
     ? `<p class="persist-warn">כדי שהרשימות לא יימחקו בעדכון ב-Render, חברו מסד PostgreSQL והגדירו DATABASE_URL.</p>`
     : "";
-  const upcoming = (state.games || [])
-    .filter((game) => !game.is_ended)
-    .slice()
-    .sort((a, b) => Date.parse(a.game_at) - Date.parse(b.game_at))
-    .slice(0, 1);
+  const upcoming = upcomingGames().slice(0, 1);
   const past = state.past_games || (state.games || []).filter((game) => game.is_ended);
-  gamesEl.innerHTML = warn + upcoming.map(renderGame).join("");
+  if (gamesEl) gamesEl.innerHTML = warn + (upcoming.length ? upcoming.map(renderGame).join("") : `<p class="muted">אין משחק קרוב להרשמה.</p>`);
   if (pastGamesEl) {
     pastGamesEl.innerHTML = past.length
       ? past.map(renderGame).join("")
@@ -867,12 +1015,13 @@ function validateAuth({ needPassword = false, needName = false } = {}) {
 }
 
 function applyAuthResult(data) {
-  applyState(data);
-  if (!data.ok && data.message) showAuthError(data.message, { toast: false });
   if (data.ok && data.user) {
     showAuthError("");
-    window.scrollTo(0, 0);
+    resetLandingTab();
   }
+  applyState(data);
+  if (!data.ok && data.message) showAuthError(data.message, { toast: false });
+  if (data.ok && data.user) window.scrollTo(0, 0);
 }
 
 function initAuth() {
@@ -938,6 +1087,7 @@ function initAuth() {
 
   if (logoutBtn) {
     logoutBtn.addEventListener("click", async () => {
+      resetLandingTab();
       const data = await api("/api/logout", {});
       applyState(data);
     });
@@ -1029,17 +1179,10 @@ function initPastGamesToggle() {
   });
 }
 
-function expandPastGames() {
-  applyPastGamesCollapsed(false);
-  try {
-    localStorage.setItem(PAST_GAMES_COLLAPSE_KEY, "0");
-  } catch (e) {}
-}
-
 function scrollToUnpaidGame() {
   const debt = state.unpaid;
   if (!debt) return;
-  expandPastGames();
+  setTab("past");
   const jump = () => {
     const card = document.querySelector(
       `.game-card[data-slot="${debt.slot}"][data-week-key="${debt.week_key}"]`
@@ -1053,15 +1196,29 @@ function scrollToUnpaidGame() {
   requestAnimationFrame(() => requestAnimationFrame(jump));
 }
 
-const notifyBtn = document.getElementById("notifyBtn");
-if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
+function initTabs() {
+  if (!appTabsEl) return;
+  appTabsEl.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-tab]");
+    if (!btn) return;
+    setTab(btn.dataset.tab);
+  });
+}
 
 initAuth();
-initHeroToggle();
-initStatsToggle();
-initPastGamesToggle();
+initTabs();
 const payWarnBtn = document.getElementById("payWarn");
 if (payWarnBtn) payWarnBtn.addEventListener("click", scrollToUnpaidGame);
+if (homeViewEl) {
+  homeViewEl.addEventListener("click", (e) => {
+    const go = e.target.closest("[data-go-tab]");
+    if (go) setTab(go.dataset.goTab);
+  });
+}
+if (matchDayViewEl) {
+  matchDayViewEl.addEventListener("click", onGameListClick);
+  matchDayViewEl.addEventListener("change", onGameListChange);
+}
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});

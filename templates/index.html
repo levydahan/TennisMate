@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=24" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=25" />
 </head>
 <body class="login-only">
   <div id="topBanners" class="top-banners">
@@ -68,105 +68,34 @@
       </div>
     </section>
     <div id="appScreen" hidden>
-    <section class="hero-card collapsed" id="heroCard">
-      <button type="button" class="hero-toggle" id="heroToggle" aria-expanded="false" aria-controls="heroBody">
-        <span class="hero-toggle-copy">
-          <span class="kicker">לוח המשחקים</span>
-          <span class="hero-title">ראשון ורביעי ב־20:00</span>
-        </span>
-        <span class="hero-toggle-action">הרחב</span>
-      </button>
-      <div id="heroBody" class="hero-body">
-        <p class="muted">התחברו עם אימייל וסיסמה, ואז לחצו «הרשמה» למשחק הפתוח. עד 6 שחקנים במגרש, אחר כך ממתינים. אחרי ביט — סמנו ששילמתם.</p>
-        <ul class="rules">
-          <li>הרשמה לראשון: מיום חמישי 21:30</li>
-          <li>הרשמה לרביעי: מיום שני 21:30</li>
-          <li>ביום המשחק ב־19:59 הגרלת זוגות, וב־21:00 הגרלה מחדש בלי אותם זוגות</li>
-          <li>רק המנהל יכול להסיר שחקנים</li>
-          <li>כל שבוע נפתחת הרשמה חדשה והקודמת נשמרת</li>
-          <li>שעה לפני המשחק תזכורת, וב־21:01 תזכורת לשלם את חלקכם במגרש</li>
-        </ul>
-        <button id="notifyBtn" class="primary-btn notify-btn" type="button">הפעלת תזכורת תשלום</button>
-        <p class="muted notify-note">אחרי אישור התראות: שעה לפני המשחק, ואחרי המשחק ב־21:01 תזכורת תשלום עם הסכום. בלי Cron הדף צריך להישאר פתוח, או להתקין את האפליקציה.</p>
-        <ol class="cron-steps">
-          <li>New + → Cron Job</li>
-          <li>URL: <code dir="ltr">https://tennismate.onrender.com/api/cron/pay-reminder</code></li>
-          <li>Schedule: <code dir="ltr">1 16-19 * * 0,3</code> (UTC)</li>
-        </ol>
-        <p class="muted notify-note">אותו <code dir="ltr">CRON_SECRET</code> בשירות הווב וב-Cron: כותרת <code dir="ltr">Authorization: Bearer …</code> או <code dir="ltr">?secret=</code>.</p>
-      </div>
-    </section>
-    <script>
-      try {
-        if (localStorage.getItem("tm-hero-collapsed") === "0") {
-          var card = document.getElementById("heroCard");
-          var btn = document.getElementById("heroToggle");
-          if (card) card.classList.remove("collapsed");
-          if (btn) {
-            btn.setAttribute("aria-expanded", "true");
-            var action = btn.querySelector(".hero-toggle-action");
-            if (action) action.textContent = "מזער";
-          }
-        }
-      } catch (e) {}
-    </script>
-
-    <div id="games" class="games"></div>
-
-    <section class="stats-card collapsed" id="statsSection">
-      <button type="button" class="hero-toggle" id="statsToggle" aria-expanded="false" aria-controls="statsBody">
-        <span class="hero-toggle-copy">
-          <span class="hero-title">סטטיסטיקה</span>
-        </span>
-        <span class="hero-toggle-action">הרחב</span>
-      </button>
-      <div id="statsBody" class="stats-body">
-        <p class="muted">ליד כל שחקן: היסטוריית הגעה והיסטוריית הזמנת מגרש — לפי משחקים שהסתיימו.</p>
-        <div id="statsLists"></div>
-      </div>
-    </section>
-    <script>
-      try {
-        if (localStorage.getItem("tm-stats-collapsed") === "0") {
-          var statsCard = document.getElementById("statsSection");
-          var statsBtn = document.getElementById("statsToggle");
-          if (statsCard) statsCard.classList.remove("collapsed");
-          if (statsBtn) {
-            statsBtn.setAttribute("aria-expanded", "true");
-            var statsAction = statsBtn.querySelector(".hero-toggle-action");
-            if (statsAction) statsAction.textContent = "מזער";
-          }
-        }
-      } catch (e) {}
-    </script>
-
-    <section class="stats-card collapsed" id="pastGamesSection">
-      <button type="button" class="hero-toggle" id="pastGamesToggle" aria-expanded="false" aria-controls="pastGamesBody">
-        <span class="hero-toggle-copy">
-          <span class="hero-title">משחקי עבר</span>
-        </span>
-        <span class="hero-toggle-action">הרחב</span>
-      </button>
-      <div id="pastGamesBody" class="stats-body">
+      <section class="tab-panel" id="tabHome" data-tab="home">
+        <div id="homeView"></div>
+      </section>
+      <section class="tab-panel" id="tabEnroll" data-tab="enroll" hidden>
+        <h2 class="tab-heading">הרשמה</h2>
+        <div id="games" class="games"></div>
+      </section>
+      <section class="tab-panel" id="tabMatch" data-tab="match" hidden>
+        <div id="matchDayView"></div>
+      </section>
+      <section class="tab-panel" id="tabPast" data-tab="past" hidden>
+        <h2 class="tab-heading">משחקי עבר</h2>
         <p class="muted">משחקים שהסתיימו ב־22:01. הרשימות נשמרות.</p>
         <div id="pastGames" class="games past-games"></div>
-      </div>
-    </section>
-    <script>
-      try {
-        if (localStorage.getItem("tm-past-collapsed") === "0") {
-          var pastCard = document.getElementById("pastGamesSection");
-          var pastBtn = document.getElementById("pastGamesToggle");
-          if (pastCard) pastCard.classList.remove("collapsed");
-          if (pastBtn) {
-            pastBtn.setAttribute("aria-expanded", "true");
-            var pastAction = pastBtn.querySelector(".hero-toggle-action");
-            if (pastAction) pastAction.textContent = "מזער";
-          }
-        }
-      } catch (e) {}
-    </script>
+      </section>
+      <section class="tab-panel" id="tabStats" data-tab="stats" hidden>
+        <h2 class="tab-heading">סטטיסטיקה כללית</h2>
+        <p class="muted">ליד כל שחקן: היסטוריית הגעה והיסטוריית הזמנת מגרש — לפי משחקים שהסתיימו.</p>
+        <div id="statsLists"></div>
+      </section>
     </div>
+    <nav id="appTabs" class="app-tabs" hidden aria-label="ניווט">
+      <button type="button" data-tab="home">ראשי</button>
+      <button type="button" data-tab="enroll">הרשמה</button>
+      <button type="button" data-tab="match">יום המשחק</button>
+      <button type="button" data-tab="past">משחקי עבר</button>
+      <button type="button" data-tab="stats">סטטיסטיקה כללית</button>
+    </nav>
   </main>
   </div>
 
@@ -184,6 +113,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=24"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=25"></script>
 </body>
 </html>

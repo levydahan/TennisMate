@@ -559,6 +559,66 @@ def attendance_stats() -> dict:
     return {"games": len(finished), "players": players}
 
 
+def my_stats(me: User | None) -> dict | None:
+    """Personal attendance, payments, and court bookings for the logged-in player."""
+    if not me:
+        return None
+    my_name = canonical_player(me.name) or me.name
+    created = me.created_at
+    if created and created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    arrived = 0
+    missed = 0
+    booked = 0
+    paid_total = 0.0
+    for slot in ("sunday", "wednesday"):
+        current = get_slot_state(slot)
+        week_keys = [
+            row[0]
+            for row in (
+                db.session.query(Enrollment.week_key)
+                .filter(Enrollment.slot == slot)
+                .distinct()
+                .all()
+            )
+        ]
+        for week_key in week_keys:
+            if week_key == current["week_key"] and not current["is_past"]:
+                continue
+            game_dt = datetime.combine(date.fromisoformat(week_key), GAME_TIME, tzinfo=TZ)
+            if created and game_dt < created.astimezone(TZ):
+                continue
+            rows = Enrollment.query.filter_by(slot=slot, week_key=week_key, is_waitlist=False).all()
+            if not rows:
+                continue
+            share = FIELD_COST_NIS / len(rows)
+            mine = next(
+                (
+                    row
+                    for row in rows
+                    if (row.user_id and row.user_id == me.id)
+                    or (canonical_player(row.name) or row.name) == my_name
+                ),
+                None,
+            )
+            settings = GameSettings.query.filter_by(slot=slot, week_key=week_key).first()
+            is_booker = bool(mine and settings and settings.booker_id == mine.id)
+            if mine:
+                arrived += 1
+                if mine.paid or is_booker:
+                    paid_total += share
+                if is_booker:
+                    booked += 1
+            else:
+                missed += 1
+    return {
+        "arrived": arrived,
+        "missed": missed,
+        "booked": booked,
+        "paid_total": round(paid_total, 2),
+    }
+
+
 def history_for_slot(slot: str, current_week_key: str, exclude: str | None = None) -> list[dict]:
     skip = {current_week_key}
     if exclude:
@@ -861,6 +921,8 @@ def public_state() -> dict:
         "past_games": ended_games,
         "players": FIXED_PLAYERS,
         "stats": attendance_stats(),
+        "my_stats": my_stats(me),
+        "enrollment_open": any(game.get("is_open") for game in upcoming_games),
         "vapid_public_key": vapid_public_key(),
         "pay_reminder_at": nxt.isoformat(),
         "pay_reminder_at_he": format_dt_he(nxt),

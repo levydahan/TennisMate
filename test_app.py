@@ -100,7 +100,14 @@ class JoinAndWaitlistTests(unittest.TestCase):
             "email": "levi@example.com",
             "password": reset_data["new_password"],
         })
-        self.assertTrue(login.get_json()["ok"])
+        login_data = login.get_json()
+        self.assertTrue(login_data["ok"])
+        self.assertIn("my_stats", login_data)
+        self.assertEqual(login_data["my_stats"]["arrived"], 0)
+        self.assertEqual(login_data["my_stats"]["missed"], 0)
+        self.assertEqual(login_data["my_stats"]["booked"], 0)
+        self.assertEqual(login_data["my_stats"]["paid_total"], 0)
+        self.assertIn("enrollment_open", login_data)
 
     def test_auth_error_messages_are_hebrew(self):
         bad_email = self.client.post("/api/register", json={
@@ -385,7 +392,11 @@ class JoinAndWaitlistTests(unittest.TestCase):
             )
             db.session.add_all([levi, shiran])
             db.session.flush()
-            db.session.add(GameSettings(slot="sunday", week_key=prev, booker_id=shiran.id))
+            settings = GameSettings.query.filter_by(slot="sunday", week_key=prev).first()
+            if settings:
+                settings.booker_id = shiran.id
+            else:
+                db.session.add(GameSettings(slot="sunday", week_key=prev, booker_id=shiran.id))
             db.session.commit()
         data = self.client.get("/api/state").get_json()
         stats = {p["name"]: p for p in data["stats"]["players"]}
