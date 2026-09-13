@@ -533,26 +533,34 @@ class JoinAndWaitlistTests(unittest.TestCase):
         self.assertEqual(stats["עידן"]["missed"], 1)
         self.assertEqual(stats["עידן"]["not_booked"], 1)
 
-    def test_stats_merge_idan_and_idan_razon(self):
+    def test_stats_merge_name_aliases(self):
         self._login_admin()
         current = self.client.get("/api/state").get_json()["games"][0]["week_key"]
         from datetime import date, timedelta
-        week_a = (date.fromisoformat(current) - timedelta(days=14)).isoformat()
-        week_b = (date.fromisoformat(current) - timedelta(days=7)).isoformat()
+        pairs = [
+            ("עידן", "עידן רזון"),
+            ("שירן", "שירן בר גיל"),
+            ("אבירם", "אבירם עמר"),
+            ("חן", "חן שעשוע"),
+        ]
         with app.app_context():
-            db.session.add(Enrollment(
-                slot="sunday", week_key=week_a, name="עידן", name_key="עידן", is_waitlist=False,
-            ))
-            db.session.add(Enrollment(
-                slot="sunday", week_key=week_b, name="עידן רזון", name_key="עידן רזון", is_waitlist=False,
-            ))
+            for index, (short, full) in enumerate(pairs):
+                week_a = (date.fromisoformat(current) - timedelta(days=14 + index)).isoformat()
+                week_b = (date.fromisoformat(current) - timedelta(days=7 + index)).isoformat()
+                db.session.add(Enrollment(
+                    slot="sunday", week_key=week_a, name=short, name_key=short, is_waitlist=False,
+                ))
+                db.session.add(Enrollment(
+                    slot="sunday", week_key=week_b, name=full, name_key=full, is_waitlist=False,
+                ))
             db.session.commit()
         data = self.client.get("/api/state").get_json()
         names = [p["name"] for p in data["stats"]["players"]]
-        self.assertIn("עידן", names)
-        self.assertNotIn("עידן רזון", names)
         stats = {p["name"]: p for p in data["stats"]["players"]}
-        self.assertGreaterEqual(stats["עידן"]["arrived"], 2)
+        for short, full in pairs:
+            self.assertIn(short, names)
+            self.assertNotIn(full, names)
+            self.assertGreaterEqual(stats[short]["arrived"], 2)
 
     def test_pay_reminder_skips_empty_and_sends_share(self):
         empty = self.client.post("/api/admin/pay-reminder", json={})
