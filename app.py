@@ -756,34 +756,18 @@ def ended_game_payload(slot: str, week_key: str, me: User | None = None) -> dict
 
 
 def latest_ended_game(me: User | None = None) -> dict | None:
-    now = now_il()
-    rows = (
-        db.session.query(Enrollment.slot, Enrollment.week_key)
-        .filter(Enrollment.is_waitlist.is_(False))
-        .distinct()
-        .all()
-    )
-    candidates = []
-    seen = set()
-    for slot, week_key in rows:
-        if slot not in SLOTS:
-            continue
-        key = (slot, week_key)
-        if key in seen:
-            continue
-        seen.add(key)
-        try:
-            game_end = datetime.combine(date.fromisoformat(week_key), GAME_END_TIME, tzinfo=TZ)
-        except ValueError:
-            continue
-        if game_end > now:
-            continue
-        candidates.append((game_end, slot, week_key))
-    candidates.sort(reverse=True)
-    for _end, slot, week_key in candidates:
-        game = ended_game_payload(slot, week_key, me)
-        if game.get("roster"):
-            return game
+    ended = []
+    for slot in ("sunday", "wednesday"):
+        state = get_slot_state(slot)
+        prev = state.get("prev_week_key")
+        if prev:
+            ended.append(ended_game_payload(slot, prev, me))
+    if not ended:
+        return None
+    ended.sort(key=lambda game: game["game_at"], reverse=True)
+    game = ended[0]
+    if game.get("roster"):
+        return game
     return None
 
 

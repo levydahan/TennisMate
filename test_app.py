@@ -178,6 +178,27 @@ class JoinAndWaitlistTests(unittest.TestCase):
         })
         self.assertEqual(denied.status_code, 401)
 
+    def test_mvp_hidden_when_previous_game_empty(self):
+        from schedule import get_slot_state
+        self.client.post("/api/register", json={
+            "email": "empty-mvp@example.com",
+            "password": "secret1",
+            "name": "מצביע",
+        })
+        with app.app_context():
+            prevs = []
+            for slot in ("sunday", "wednesday"):
+                state = get_slot_state(slot)
+                if state.get("prev_week_key"):
+                    prevs.append((state["prev_week_key"], slot))
+            self.assertGreaterEqual(len(prevs), 2)
+            older_week, older_slot = sorted(prevs)[0]
+            db.session.add(Enrollment(
+                slot=older_slot, week_key=older_week, name="לוי", name_key="לוי", is_waitlist=False,
+            ))
+            db.session.commit()
+        self.assertIsNone(self.client.get("/api/state").get_json()["mvp"])
+
     def test_register_login_and_reset_password(self):
         created = self.client.post("/api/register", json={
             "email": "levi@example.com",
