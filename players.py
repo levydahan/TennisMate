@@ -15,6 +15,7 @@ FIXED_PLAYERS = [
 # Nicknames / old spellings stored in existing enrollments.
 NAME_ALIASES = {
     "עידו": "עידן",
+    "עידן רזון": "עידן",
 }
 
 

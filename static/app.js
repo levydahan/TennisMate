@@ -656,6 +656,7 @@ function renderHome() {
         <li><strong>${mine.booked || 0}</strong><span>הזמנות מגרש</span></li>
       </ul>
       ${cta}
+      ${renderMvpCard()}
       <button id="notifyBtn" class="ghost-btn notify-btn" type="button">${
         notifyOn ? "תזכורות תשלום פעילות" : "הפעלת תזכורת תשלום"
       }</button>
@@ -665,6 +666,32 @@ function renderHome() {
   if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
   const avatarInput = document.getElementById("avatarInput");
   if (avatarInput) avatarInput.addEventListener("change", onAvatarPicked);
+}
+
+let mvpOpen = false;
+
+function renderMvpCard() {
+  const poll = state.mvp;
+  if (!poll || !(poll.players || []).length) return "";
+  const picks = (poll.players || []).map((player) => `
+    <button type="button" class="mvp-pick${player.id === poll.my_pick_id ? " selected" : ""}" data-mvp-pick="${player.id}">
+      ${player.avatar
+        ? `<img class="row-avatar" src="${esc(player.avatar)}" alt="" />`
+        : `<span class="mvp-initial">${esc((player.name || "?").slice(0, 1))}</span>`}
+      <span>${esc(player.name)}</span>
+    </button>
+  `).join("");
+  const action = poll.my_pick_name ? "שינוי הצבעה" : "הצבעה למצטיין";
+  return `
+    <div class="mvp-block">
+      <p class="kicker">מצטיין המשחק</p>
+      <p class="mvp-game">${esc(poll.game_at_he)}</p>
+      ${poll.my_pick_name ? `<p class="muted">ההצבעה שלך: <strong>${esc(poll.my_pick_name)}</strong></p>` : `<p class="muted">בחרו שחקן אחד שהגיע למשחק הקודם.</p>`}
+      ${poll.leader_name ? `<p class="muted">מוביל: <strong>${esc(poll.leader_name)}</strong> · ${poll.leader_votes} ${poll.leader_votes === 1 ? "קול" : "קולות"}</p>` : ""}
+      <button class="primary-btn" data-mvp-toggle type="button">${mvpOpen ? "סגירה" : action}</button>
+      ${mvpOpen ? `<div class="mvp-picks">${picks}</div>` : ""}
+    </div>
+  `;
 }
 
 function resizeAvatar(file) {
@@ -1306,9 +1333,28 @@ initTabs();
 const payWarnBtn = document.getElementById("payWarn");
 if (payWarnBtn) payWarnBtn.addEventListener("click", scrollToUnpaidGame);
 if (homeViewEl) {
-  homeViewEl.addEventListener("click", (e) => {
+  homeViewEl.addEventListener("click", async (e) => {
     const go = e.target.closest("[data-go-tab]");
-    if (go) setTab(go.dataset.goTab);
+    if (go) {
+      setTab(go.dataset.goTab);
+      return;
+    }
+    const toggle = e.target.closest("[data-mvp-toggle]");
+    if (toggle) {
+      mvpOpen = !mvpOpen;
+      renderHome();
+      return;
+    }
+    const pick = e.target.closest("[data-mvp-pick]");
+    if (!pick || !state.mvp) return;
+    pick.disabled = true;
+    const data = await api("/api/mvp", {
+      slot: state.mvp.slot,
+      week_key: state.mvp.week_key,
+      player_id: Number(pick.dataset.mvpPick),
+    });
+    mvpOpen = false;
+    applyState(data);
   });
 }
 if (matchDayViewEl) {

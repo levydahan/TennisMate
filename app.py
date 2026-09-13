@@ -183,6 +183,21 @@ class HourBeforeLog(db.Model):
     )
 
 
+class MvpVote(db.Model):
+    __tablename__ = "mvp_votes"
+
+    id = db.Column(db.Integer, primary_key=True)
+    slot = db.Column(db.String(20), nullable=False, index=True)
+    week_key = db.Column(db.String(16), nullable=False, index=True)
+    voter_user_id = db.Column(db.Integer, nullable=False, index=True)
+    player_id = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.UniqueConstraint("slot", "week_key", "voter_user_id", name="uq_mvp_voter_game"),
+    )
+
+
 class AppSetting(db.Model):
     __tablename__ = "app_settings"
 
@@ -740,6 +755,70 @@ def ended_game_payload(slot: str, week_key: str, me: User | None = None) -> dict
     }
 
 
+def latest_ended_game(me: User | None = None) -> dict | None:
+    now = now_il()
+    rows = (
+        db.session.query(Enrollment.slot, Enrollment.week_key)
+        .filter(Enrollment.is_waitlist.is_(False))
+        .distinct()
+        .all()
+    )
+    candidates = []
+    seen = set()
+    for slot, week_key in rows:
+        if slot not in SLOTS:
+            continue
+        key = (slot, week_key)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            game_end = datetime.combine(date.fromisoformat(week_key), GAME_END_TIME, tzinfo=TZ)
+        except ValueError:
+            continue
+        if game_end > now:
+            continue
+        candidates.append((game_end, slot, week_key))
+    candidates.sort(reverse=True)
+    for _end, slot, week_key in candidates:
+        game = ended_game_payload(slot, week_key, me)
+        if game.get("roster"):
+            return game
+    return None
+
+
+def mvp_payload(me: User | None) -> dict | None:
+    game = latest_ended_game(me)
+    if not game:
+        return None
+    votes = MvpVote.query.filter_by(slot=game["slot"], week_key=game["week_key"]).all()
+    counts: dict[int, int] = {}
+    my_pick = None
+    for vote in votes:
+        counts[vote.player_id] = counts.get(vote.player_id, 0) + 1
+        if me and vote.voter_user_id == me.id:
+            my_pick = vote.player_id
+    by_id = {player["id"]: player for player in game["roster"]}
+    leader_id = max(counts, key=lambda pid: (counts[pid], -pid)) if counts else None
+    leader = by_id.get(leader_id) if leader_id else None
+    mine = by_id.get(my_pick) if my_pick else None
+    return {
+        "slot": game["slot"],
+        "week_key": game["week_key"],
+        "label_he": game["label_he"],
+        "game_at_he": game["game_at_he"],
+        "players": [
+            {"id": player["id"], "name": player["name"], "avatar": player.get("avatar")}
+            for player in game["roster"]
+        ],
+        "my_pick_id": my_pick,
+        "my_pick_name": mine["name"] if mine else None,
+        "leader_name": leader["name"] if leader else None,
+        "leader_votes": counts.get(leader_id, 0) if leader_id else 0,
+        "total_votes": len(votes),
+    }
+
+
 def _b64url(raw: bytes) -> str:
     import base64
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
@@ -944,6 +1023,7 @@ def public_state() -> dict:
         "stats": attendance_stats(),
         "my_stats": my_stats(me),
         "enrollment_open": any(game.get("is_open") for game in upcoming_games),
+        "mvp": mvp_payload(me),
         "vapid_public_key": vapid_public_key(),
         "pay_reminder_at": nxt.isoformat(),
         "pay_reminder_at_he": format_dt_he(nxt),
@@ -1221,6 +1301,37 @@ def api_leave():
     message = "ההרשמה בוטלה"
     if promoted:
         message += f" · {promoted} עלה מההמתנה"
+    payload = public_state()
+    payload.update({"ok": True, "message": message})
+    return jsonify(payload)
+
+
+@app.post("/api/mvp")
+def api_mvp():
+    user = current_user()
+    if not user:
+        return jsonify({"ok": False, "message": "יש להתחבר"}), 401
+    data = request.get_json(silent=True) or {}
+    slot = (data.get("slot") or "").strip()
+    week_key = (data.get("week_key") or "").strip()
+    try:
+        player_id = int(data.get("player_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "message": "יש לבחור שחקן"}), 400
+    game = latest_ended_game(user)
+    if not game or game["slot"] != slot or game["week_key"] != week_key:
+        return jsonify({"ok": False, "message": "אפשר להצביע רק למשחק הקודם"}), 400
+    chosen = next((player for player in game["roster"] if player["id"] == player_id), None)
+    if not chosen:
+        return jsonify({"ok": False, "message": "אפשר לבחור רק שחקן שהגיע"}), 400
+    vote = MvpVote.query.filter_by(slot=slot, week_key=week_key, voter_user_id=user.id).first()
+    if vote:
+        vote.player_id = player_id
+        message = f"ההצבעה עודכנה · {chosen['name']}"
+    else:
+        db.session.add(MvpVote(slot=slot, week_key=week_key, voter_user_id=user.id, player_id=player_id))
+        message = f"הצבעת למצטיין · {chosen['name']}"
+    db.session.commit()
     payload = public_state()
     payload.update({"ok": True, "message": message})
     return jsonify(payload)

@@ -5,7 +5,7 @@ import unittest
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["SECRET_KEY"] = "test"
 
-from app import Enrollment, GameSettings, app, db
+from app import Enrollment, GameSettings, MvpVote, app, db
 from players import FIXED_PLAYERS
 
 
@@ -123,6 +123,60 @@ class JoinAndWaitlistTests(unittest.TestCase):
         cleared = self.client.post("/api/me/avatar", json={"image": ""})
         self.assertTrue(cleared.get_json()["ok"])
         self.assertIsNone(cleared.get_json()["user"]["avatar"])
+
+    def test_mvp_vote_for_previous_arrivals(self):
+        from schedule import get_slot_state
+        self.client.post("/api/register", json={
+            "email": "mvp@example.com",
+            "password": "secret1",
+            "name": "מצביע",
+        })
+        with app.app_context():
+            candidates = []
+            for slot in ("sunday", "wednesday"):
+                state = get_slot_state(slot)
+                if state.get("prev_week_key"):
+                    candidates.append((state["prev_week_key"], slot))
+            self.assertTrue(candidates)
+            week_key, slot = sorted(candidates, reverse=True)[0]
+            db.session.add(Enrollment(
+                slot=slot, week_key=week_key, name="לוי", name_key="לוי", is_waitlist=False,
+            ))
+            db.session.add(Enrollment(
+                slot=slot, week_key=week_key, name="שירן", name_key="שירן", is_waitlist=False,
+            ))
+            db.session.add(Enrollment(
+                slot=slot, week_key=week_key, name="חן", name_key="חן", is_waitlist=True,
+            ))
+            db.session.commit()
+        poll = self.client.get("/api/state").get_json()["mvp"]
+        self.assertTrue(poll)
+        self.assertGreaterEqual(len(poll["players"]), 2)
+        self.assertNotIn("חן", [player["name"] for player in poll["players"]])
+        first, second = poll["players"][0], poll["players"][1]
+        voted = self.client.post("/api/mvp", json={
+            "slot": poll["slot"],
+            "week_key": poll["week_key"],
+            "player_id": first["id"],
+        })
+        data = voted.get_json()
+        self.assertTrue(data["ok"], data)
+        self.assertEqual(data["mvp"]["my_pick_id"], first["id"])
+        changed = self.client.post("/api/mvp", json={
+            "slot": poll["slot"],
+            "week_key": poll["week_key"],
+            "player_id": second["id"],
+        })
+        self.assertEqual(changed.get_json()["mvp"]["my_pick_id"], second["id"])
+        with app.app_context():
+            self.assertEqual(MvpVote.query.count(), 1)
+        self.client.post("/api/logout", json={})
+        denied = self.client.post("/api/mvp", json={
+            "slot": poll["slot"],
+            "week_key": poll["week_key"],
+            "player_id": first["id"],
+        })
+        self.assertEqual(denied.status_code, 401)
 
     def test_register_login_and_reset_password(self):
         created = self.client.post("/api/register", json={
@@ -457,6 +511,27 @@ class JoinAndWaitlistTests(unittest.TestCase):
         self.assertEqual(stats["לוי"]["arrived"], 1)
         self.assertEqual(stats["עידן"]["missed"], 1)
         self.assertEqual(stats["עידן"]["not_booked"], 1)
+
+    def test_stats_merge_idan_and_idan_razon(self):
+        self._login_admin()
+        current = self.client.get("/api/state").get_json()["games"][0]["week_key"]
+        from datetime import date, timedelta
+        week_a = (date.fromisoformat(current) - timedelta(days=14)).isoformat()
+        week_b = (date.fromisoformat(current) - timedelta(days=7)).isoformat()
+        with app.app_context():
+            db.session.add(Enrollment(
+                slot="sunday", week_key=week_a, name="עידן", name_key="עידן", is_waitlist=False,
+            ))
+            db.session.add(Enrollment(
+                slot="sunday", week_key=week_b, name="עידן רזון", name_key="עידן רזון", is_waitlist=False,
+            ))
+            db.session.commit()
+        data = self.client.get("/api/state").get_json()
+        names = [p["name"] for p in data["stats"]["players"]]
+        self.assertIn("עידן", names)
+        self.assertNotIn("עידן רזון", names)
+        stats = {p["name"]: p for p in data["stats"]["players"]}
+        self.assertGreaterEqual(stats["עידן"]["arrived"], 2)
 
     def test_pay_reminder_skips_empty_and_sends_share(self):
         empty = self.client.post("/api/admin/pay-reminder", json={})
