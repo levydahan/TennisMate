@@ -105,6 +105,26 @@ class TeamDrawTests(unittest.TestCase):
         self.assertEqual(len(hour2), 3)
         self.assertEqual(forbidden_pairs(hour1) & forbidden_pairs(hour2), set())
 
+    def test_yigal_and_roy_never_paired(self):
+        names = ["לוי", "שירן", "אבירם", "יגאל", "עידן", "רועי"]
+        players = [{"id": i, "name": name} for i, name in enumerate(names)]
+        blocked = frozenset({"יגאל", "רועי"})
+        for seed in range(40):
+            hour1 = draw_teams(players, random.Random(seed))
+            pairs1 = {
+                frozenset(p["name"] for p in team["players"])
+                for team in hour1
+                if len(team["players"]) == 2
+            }
+            self.assertNotIn(blocked, pairs1, seed)
+            hour2 = draw_rematch(players, hour1, random.Random(seed + 100))
+            pairs2 = {
+                frozenset(p["name"] for p in team["players"])
+                for team in hour2
+                if len(team["players"]) == 2
+            }
+            self.assertNotIn(blocked, pairs2, seed)
+
     def test_two_players_must_repeat(self):
         players = [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
         hour1 = draw_teams(players, random.Random(1))

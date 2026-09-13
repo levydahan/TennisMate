@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 
 import random
 
+from players import canonical_player
+
 TZ = ZoneInfo("Asia/Jerusalem")
 GAME_TIME = time(20, 0)
 DRAW_TIME = time(19, 59)
@@ -16,6 +18,9 @@ ENROLL_OPEN_TIME = time(21, 30)
 MAX_PLAYERS = 6
 FIELD_COST_NIS = 60
 TEAM_LETTERS = "אבגדהו"
+FORBIDDEN_TEAMMATES = (
+    frozenset({"יגאל", "רועי"}),
+)
 
 DAYS_HE = [
     "יום שני",
@@ -135,10 +140,7 @@ def format_dt_he(dt: datetime) -> str:
 
 def draw_teams(players: list, rng: random.Random | None = None) -> list[dict]:
     """Shuffle players and pair them into teams of 2. A leftover player is a team of 1."""
-    rng = rng or random.Random()
-    shuffled = list(players)
-    rng.shuffle(shuffled)
-    return _chunks_to_teams(_pair_chunks(shuffled))
+    return _pick_pairing(players, rng or random.Random())
 
 
 def _pair_chunks(players: list) -> list[list]:
@@ -176,6 +178,42 @@ def forbidden_pairs(teams: list | None) -> set[frozenset]:
     return keys
 
 
+def _player_name(player: dict) -> str:
+    raw = player.get("name") or ""
+    return canonical_player(raw) or raw
+
+
+def _name_pair_key(chunk: list) -> frozenset | None:
+    names = [_player_name(player) for player in chunk]
+    if len(names) == 2:
+        return frozenset(names)
+    return None
+
+
+def blocked_teammate_pairs(chunks: list[list]) -> int:
+    return sum(
+        1
+        for chunk in chunks
+        if (key := _name_pair_key(chunk)) and key in FORBIDDEN_TEAMMATES
+    )
+
+
+def _pick_pairing(players: list, rng: random.Random, hour1_teams: list | None = None) -> list[dict]:
+    if len(players) < 2:
+        leftover = list(players)
+        rng.shuffle(leftover)
+        return _chunks_to_teams(_pair_chunks(leftover))
+    forbidden = forbidden_pairs(hour1_teams)
+    candidates = list(generate_pairings(players))
+    rng.shuffle(candidates)
+
+    def score(chunks: list[list]) -> tuple[int, int]:
+        repeats = sum(1 for chunk in chunks if (key := _pair_key(chunk)) and key in forbidden)
+        return (blocked_teammate_pairs(chunks), repeats)
+
+    return _chunks_to_teams(min(candidates, key=score))
+
+
 def _even_pairings(players: list):
     if not players:
         yield []
@@ -205,18 +243,7 @@ def generate_pairings(players: list):
 
 def draw_rematch(players: list, hour1_teams: list | None, rng: random.Random | None = None) -> list[dict]:
     """Pair again, avoiding first-hour partners whenever any alternative exists."""
-    rng = rng or random.Random()
-    if len(players) < 2:
-        return draw_teams(players, rng)
-    forbidden = forbidden_pairs(hour1_teams)
-    candidates = list(generate_pairings(players))
-    rng.shuffle(candidates)
-
-    def repeats(chunks: list[list]) -> int:
-        return sum(1 for chunk in chunks if (key := _pair_key(chunk)) and key in forbidden)
-
-    best = min(candidates, key=repeats)
-    return _chunks_to_teams(best)
+    return _pick_pairing(players, rng or random.Random(), hour1_teams)
 
 
 def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
