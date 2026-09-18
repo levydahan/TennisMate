@@ -9,6 +9,7 @@ from schedule import (
     SLOTS,
     TZ,
     format_dt_he,
+    get_slot_state,
     now_il,
     todays_match_game_at,
 )
@@ -27,29 +28,30 @@ def pay_remind_at(week_key: str) -> datetime:
     return datetime.combine(date.fromisoformat(week_key), PAY_REMIND_TIME, tzinfo=TZ)
 
 
-def next_named_at(clock, now: datetime | None = None) -> datetime:
+def next_named_at(clock, now: datetime | None = None, date_overrides: dict | None = None) -> datetime:
     now = now_il() if now is None else now
     if now.tzinfo is None:
         now = now.replace(tzinfo=TZ)
     else:
         now = now.astimezone(TZ)
     candidates = []
-    for spec in SLOTS.values():
-        days_ahead = (spec["weekday"] - now.weekday()) % 7
-        day = now.date() + timedelta(days=days_ahead)
-        dt = datetime.combine(day, clock, tzinfo=TZ)
+    for slot_key in SLOTS:
+        state = get_slot_state(slot_key, now, date_overrides)
+        game_day = datetime.fromisoformat(state["game_at"]).astimezone(TZ).date()
+        dt = datetime.combine(game_day, clock, tzinfo=TZ)
         if dt <= now:
-            dt += timedelta(days=7)
+            nxt = date.fromisoformat(state["week_key"]) + timedelta(days=7)
+            dt = datetime.combine(nxt, clock, tzinfo=TZ)
         candidates.append(dt)
     return min(candidates)
 
 
-def next_pay_reminder_at(now: datetime | None = None) -> datetime:
-    return next_named_at(PAY_REMIND_TIME, now)
+def next_pay_reminder_at(now: datetime | None = None, date_overrides: dict | None = None) -> datetime:
+    return next_named_at(PAY_REMIND_TIME, now, date_overrides)
 
 
-def next_hour_before_at(now: datetime | None = None) -> datetime:
-    return next_named_at(HOUR_BEFORE_TIME, now)
+def next_hour_before_at(now: datetime | None = None, date_overrides: dict | None = None) -> datetime:
+    return next_named_at(HOUR_BEFORE_TIME, now, date_overrides)
 
 
 def build_pay_message(label_he: str, share: float, names: list[str]) -> dict:
@@ -77,16 +79,23 @@ def reminder_is_due(state: dict, now: datetime | None = None, force: bool = Fals
         return True
     if not state.get("is_past"):
         return False
-    return now >= pay_remind_at(state["week_key"])
+    game_at = state.get("game_at")
+    if game_at:
+        day = datetime.fromisoformat(game_at).astimezone(TZ).date()
+    else:
+        day = date.fromisoformat(state["week_key"])
+    return now >= datetime.combine(day, PAY_REMIND_TIME, tzinfo=TZ)
 
 
-def hour_before_is_due(now: datetime | None = None, force: bool = False) -> bool:
+def hour_before_is_due(
+    now: datetime | None = None, force: bool = False, date_overrides: dict | None = None
+) -> bool:
     now = now_il() if now is None else now
     if now.tzinfo is None:
         now = now.replace(tzinfo=TZ)
     else:
         now = now.astimezone(TZ)
-    game_at = todays_match_game_at(now)
+    game_at = todays_match_game_at(now, date_overrides)
     if force:
         return True
     if not game_at:

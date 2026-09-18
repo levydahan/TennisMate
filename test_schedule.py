@@ -1,9 +1,9 @@
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 
 import random
 
-from schedule import TZ, banner_should_flash, banner_target, draw_rematch, draw_teams, forbidden_pairs, get_slot_state
+from schedule import TZ, banner_should_flash, banner_target, draw_rematch, draw_teams, forbidden_pairs, get_slot_state, is_match_day
 
 
 class SundayEnrollmentTests(unittest.TestCase):
@@ -237,6 +237,47 @@ class MatchDayTests(unittest.TestCase):
         self.assertTrue(hour_before_is_due(sunday_1900))
         self.assertFalse(hour_before_is_due(sunday_2000))
         self.assertFalse(hour_before_is_due(friday))
+
+
+class DateOverrideTests(unittest.TestCase):
+    def test_moved_sunday_keeps_week_key_and_relabels(self):
+        now = datetime(2026, 8, 27, 22, 0, tzinfo=TZ)
+        overrides = {("sunday", "2026-08-30"): date(2026, 8, 31)}
+        state = get_slot_state("sunday", now, overrides)
+        self.assertEqual(state["week_key"], "2026-08-30")
+        self.assertEqual(state["game_date"], "2026-08-31")
+        self.assertTrue(state["date_override"])
+        self.assertEqual(state["label_he"], "יום שני")
+        self.assertTrue(state["is_open"])
+        self.assertFalse(is_match_day(now, overrides))
+
+    def test_later_override_stays_until_new_end(self):
+        overrides = {("sunday", "2026-08-30"): date(2026, 8, 31)}
+        sunday_night = get_slot_state("sunday", datetime(2026, 8, 30, 22, 1, tzinfo=TZ), overrides)
+        self.assertEqual(sunday_night["week_key"], "2026-08-30")
+        self.assertEqual(sunday_night["game_date"], "2026-08-31")
+        monday_eve = get_slot_state("sunday", datetime(2026, 8, 31, 19, 0, tzinfo=TZ), overrides)
+        self.assertEqual(monday_eve["week_key"], "2026-08-30")
+        self.assertTrue(is_match_day(datetime(2026, 8, 31, 19, 0, tzinfo=TZ), overrides))
+        rolled = get_slot_state("sunday", datetime(2026, 8, 31, 22, 1, tzinfo=TZ), overrides)
+        self.assertEqual(rolled["week_key"], "2026-09-06")
+        self.assertEqual(rolled["game_date"], "2026-09-06")
+        self.assertFalse(rolled["date_override"])
+
+    def test_earlier_override_rolls_after_that_night(self):
+        overrides = {("sunday", "2026-08-30"): date(2026, 8, 29)}
+        saturday_eve = get_slot_state("sunday", datetime(2026, 8, 29, 21, 0, tzinfo=TZ), overrides)
+        self.assertEqual(saturday_eve["week_key"], "2026-08-30")
+        self.assertEqual(saturday_eve["game_date"], "2026-08-29")
+        self.assertTrue(saturday_eve["is_open"])
+        rolled = get_slot_state("sunday", datetime(2026, 8, 29, 22, 1, tzinfo=TZ), overrides)
+        self.assertEqual(rolled["week_key"], "2026-09-06")
+
+    def test_hour_before_follows_override(self):
+        from reminders import hour_before_is_due
+        overrides = {("sunday", "2026-08-30"): date(2026, 8, 31)}
+        self.assertFalse(hour_before_is_due(datetime(2026, 8, 30, 19, 0, tzinfo=TZ), date_overrides=overrides))
+        self.assertTrue(hour_before_is_due(datetime(2026, 8, 31, 19, 0, tzinfo=TZ), date_overrides=overrides))
 
 
 if __name__ == "__main__":

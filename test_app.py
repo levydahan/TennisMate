@@ -1,12 +1,15 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime
+from unittest.mock import patch
 
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["SECRET_KEY"] = "test"
 
 from app import Enrollment, GameSettings, app, db
 from players import FIXED_PLAYERS
+from schedule import TZ
 
 
 class JoinAndWaitlistTests(unittest.TestCase):
@@ -347,28 +350,69 @@ class JoinAndWaitlistTests(unittest.TestCase):
         self.assertEqual(sunday["field_cost"], 60)
 
     def test_choose_booker_from_roster(self):
-        self._login_admin()
-        self.client.post("/api/join", json={"slot": "sunday", "name": "לוי"})
-        self.client.post("/api/join", json={"slot": "sunday", "name": "שירן"})
-        self.client.post("/api/admin/logout", json={})
-        roster = self._game(self.client.get("/api/state").get_json(), "sunday")["roster"]
-        res = self.client.post("/api/booker", json={"slot": "sunday", "player_id": roster[1]["id"]})
+        self.client.post("/api/register", json={
+            "email": "booker1@example.com",
+            "password": "secret1",
+            "name": "מזמין אחד",
+        })
+        self.client.post("/api/join", json={"slot": "sunday"})
+        self.client.post("/api/logout", json={})
+        self.client.post("/api/register", json={
+            "email": "booker2@example.com",
+            "password": "secret1",
+            "name": "מזמין שני",
+        })
+        self.client.post("/api/join", json={"slot": "sunday"})
+        users = {u["name"]: u["id"] for u in self.client.get("/api/state").get_json()["users"]}
+        res = self.client.post("/api/booker", json={"slot": "sunday", "user_id": users["מזמין אחד"]})
         data = res.get_json()
-        self.assertTrue(data["ok"])
-        self.assertEqual(self._game(data, "sunday")["booker_name"], "שירן")
+        self.assertTrue(data["ok"], data)
+        sunday = self._game(data, "sunday")
+        self.assertEqual(sunday["booker_name"], "מזמין אחד")
+        self.assertIsNotNone(sunday["booker_id"])
 
     def test_choose_custom_booker_name(self):
+        denied = self.client.post("/api/booker", json={"slot": "sunday", "name": "דני המזמין"})
+        self.assertEqual(denied.status_code, 401)
+        self.client.post("/api/register", json={
+            "email": "custombooker@example.com",
+            "password": "secret1",
+            "name": "בוחר מזמין",
+        })
         res = self.client.post("/api/booker", json={"slot": "sunday", "name": "דני המזמין"})
         data = res.get_json()
         self.assertTrue(data["ok"], data)
         sunday = self._game(data, "sunday")
         self.assertIsNone(sunday["booker_id"])
         self.assertEqual(sunday["booker_name"], "דני המזמין")
+        self._login_admin()
+        self.client.post("/api/join", json={"slot": "sunday", "name": "שירן"})
         aliased = self.client.post("/api/booker", json={"slot": "sunday", "name": "שירן בר גיל"})
         sunday = self._game(aliased.get_json(), "sunday")
         self.assertEqual(sunday["booker_name"], "שירן")
         cleared = self.client.post("/api/booker", json={"slot": "sunday", "name": ""})
         self.assertIsNone(self._game(cleared.get_json(), "sunday")["booker_name"])
+
+    def test_logged_in_user_can_pick_any_registered_booker(self):
+        self.client.post("/api/register", json={
+            "email": "offroster@example.com",
+            "password": "secret1",
+            "name": "לא במשחק",
+        })
+        self.client.post("/api/logout", json={})
+        self.client.post("/api/register", json={
+            "email": "picker@example.com",
+            "password": "secret1",
+            "name": "בוחר מהרשימה",
+        })
+        users = {u["name"]: u["id"] for u in self.client.get("/api/state").get_json()["users"]}
+        self.assertEqual(set(users), {"בוחר מהרשימה", "לא במשחק"})
+        res = self.client.post("/api/booker", json={"slot": "sunday", "user_id": users["לא במשחק"]})
+        data = res.get_json()
+        self.assertTrue(data["ok"], data)
+        sunday = self._game(data, "sunday")
+        self.assertEqual(sunday["booker_name"], "לא במשחק")
+        self.assertIsNone(sunday["booker_id"])
 
     def test_keeps_previous_week_enrollments(self):
         self._login_admin()
@@ -573,6 +617,47 @@ class JoinAndWaitlistTests(unittest.TestCase):
                 os.environ.pop("CRON_SECRET", None)
             else:
                 os.environ["CRON_SECRET"] = old_secret
+
+    def test_only_admin_can_move_game_date(self):
+        frozen = datetime(2026, 8, 27, 22, 0, tzinfo=TZ)
+        with patch("schedule.now_il", return_value=frozen), patch("app.now_il", return_value=frozen):
+            denied = self.client.post("/api/admin/game-date", json={"slot": "sunday", "date": "2026-08-31"})
+            self.assertEqual(denied.status_code, 401)
+            player = self.client.post("/api/register", json={
+                "email": "date@example.com",
+                "password": "secret1",
+                "name": "שחקן תאריך",
+            })
+            self.assertTrue(player.get_json()["ok"], player.get_json())
+            still = self.client.post("/api/admin/game-date", json={"slot": "sunday", "date": "2026-08-31"})
+            self.assertEqual(still.status_code, 401)
+            self.assertFalse(self.client.get("/api/state").get_json()["is_admin"])
+            self._login_admin()
+            state = self.client.get("/api/state").get_json()
+            self.assertTrue(state["is_admin"])
+            sunday = self._game(state, "sunday")
+            self.assertEqual(sunday["week_key"], "2026-08-30")
+            self.assertEqual(sunday["game_date"], "2026-08-30")
+            moved = self.client.post("/api/admin/game-date", json={"slot": "sunday", "date": "2026-08-31"})
+            data = moved.get_json()
+            self.assertTrue(data["ok"], data)
+            sunday = self._game(data, "sunday")
+            self.assertEqual(sunday["week_key"], "2026-08-30")
+            self.assertEqual(sunday["game_date"], "2026-08-31")
+            self.assertTrue(sunday["date_override"])
+            self.assertEqual(sunday["label_he"], "יום שני")
+            self.client.post("/api/join", json={"slot": "sunday", "name": "לוי"})
+            row = Enrollment.query.filter_by(slot="sunday", week_key="2026-08-30").one()
+            self.assertEqual(row.week_key, "2026-08-30")
+            settings = GameSettings.query.filter_by(slot="sunday", week_key="2026-08-30").one()
+            self.assertEqual(settings.game_date, "2026-08-31")
+            clash = self.client.post("/api/admin/game-date", json={"slot": "sunday", "date": "2026-09-02"})
+            self.assertEqual(clash.status_code, 400)
+            reset = self.client.post("/api/admin/game-date", json={"slot": "sunday", "date": ""})
+            sunday = self._game(reset.get_json(), "sunday")
+            self.assertTrue(reset.get_json()["ok"])
+            self.assertEqual(sunday["game_date"], "2026-08-30")
+            self.assertFalse(sunday["date_override"])
 
 
 if __name__ == "__main__":

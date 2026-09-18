@@ -138,6 +138,7 @@ class GameSettings(db.Model):
     week_key = db.Column(db.String(16), nullable=False)
     booker_id = db.Column(db.Integer, nullable=True)
     booker_custom = db.Column(db.String(80), nullable=True)
+    game_date = db.Column(db.String(16), nullable=True)
     teams_json = db.Column(db.Text, nullable=True)
     teams_ids = db.Column(db.String(200), nullable=True)
     teams2_json = db.Column(db.Text, nullable=True)
@@ -224,6 +225,8 @@ def _ensure_schema():
                 conn.execute(text("ALTER TABLE game_settings ADD COLUMN teams2_ids VARCHAR(200)"))
             if "booker_custom" not in columns:
                 conn.execute(text("ALTER TABLE game_settings ADD COLUMN booker_custom VARCHAR(80)"))
+            if "game_date" not in columns:
+                conn.execute(text("ALTER TABLE game_settings ADD COLUMN game_date VARCHAR(16)"))
     if "users" in inspector.get_table_names():
         columns = {col["name"] for col in inspector.get_columns("users")}
         if "avatar" not in columns:
@@ -277,6 +280,14 @@ def serialize_user(user: User | None) -> dict | None:
     if not user:
         return None
     return {"id": user.id, "email": user.email, "name": user.name, "avatar": user.avatar}
+
+
+def booker_users() -> list[dict]:
+    rows = User.query.order_by(User.name.asc(), User.id.asc()).all()
+    return [
+        {"id": row.id, "name": canonical_player(row.name) or row.name}
+        for row in rows
+    ]
 
 
 def login_user(user: User) -> None:
@@ -368,9 +379,36 @@ def owns_enrollment(row: Enrollment, user: User) -> bool:
     return row.name_key == normalize_name(user.name)[1]
 
 
-def sync_slot(slot: str) -> dict:
+def load_date_overrides() -> dict:
+    cached = getattr(g, "date_overrides", None)
+    if cached is not None:
+        return cached
+    mapping = {}
+    try:
+        rows = GameSettings.query.filter(GameSettings.game_date.isnot(None)).all()
+    except Exception:
+        g.date_overrides = {}
+        return g.date_overrides
+    for row in rows:
+        raw = (row.game_date or "").strip()
+        if not raw:
+            continue
+        try:
+            mapping[(row.slot, row.week_key)] = date.fromisoformat(raw)
+        except ValueError:
+            continue
+    g.date_overrides = mapping
+    return mapping
+
+
+def clear_date_overrides_cache():
+    if hasattr(g, "date_overrides"):
+        delattr(g, "date_overrides")
+
+
+def sync_slot(slot: str, now: datetime | None = None) -> dict:
     """Return the current game cycle. Past enrollments are kept forever."""
-    return get_slot_state(slot)
+    return get_slot_state(slot, now, load_date_overrides())
 
 
 def week_label(week_key: str) -> str:
@@ -730,14 +768,23 @@ def serialize_player(row: Enrollment, me: User | None = None) -> dict:
 
 
 def ended_game_payload(slot: str, week_key: str, me: User | None = None) -> dict:
-    spec = SLOTS[slot]
-    game_dt = datetime.combine(date.fromisoformat(week_key), GAME_TIME, tzinfo=TZ)
-    game_end_dt = datetime.combine(date.fromisoformat(week_key), GAME_END_TIME, tzinfo=TZ)
+    play_day = date.fromisoformat(week_key)
+    settings = GameSettings.query.filter_by(slot=slot, week_key=week_key).first()
+    raw = (getattr(settings, "game_date", None) or "").strip()
+    if raw:
+        try:
+            play_day = date.fromisoformat(raw)
+        except ValueError:
+            play_day = date.fromisoformat(week_key)
+    game_dt = datetime.combine(play_day, GAME_TIME, tzinfo=TZ)
+    game_end_dt = datetime.combine(play_day, GAME_END_TIME, tzinfo=TZ)
     players = players_payload(slot, week_key, True, True, me)
     return {
         "slot": slot,
-        "label_he": spec["label_he"],
+        "label_he": DAYS_HE[play_day.weekday()],
         "week_key": week_key,
+        "game_date": play_day.isoformat(),
+        "date_override": play_day.isoformat() != week_key,
         "prev_week_key": None,
         "game_at": game_dt.isoformat(),
         "game_end_at": game_end_dt.isoformat(),
@@ -867,7 +914,7 @@ def run_pay_reminders(force: bool = False) -> dict:
     sent = []
     skipped = []
     for slot in ("sunday", "wednesday"):
-        state = get_slot_state(slot, now)
+        state = get_slot_state(slot, now, load_date_overrides())
         players = players_payload(slot, state["week_key"], state["teams_ready"], state.get("rematch_ready", False))
         roster = players["roster"]
         if not roster:
@@ -897,17 +944,23 @@ def run_pay_reminders(force: bool = False) -> dict:
 
 def run_hour_before_reminders(force: bool = False) -> dict:
     now = now_il()
-    if not hour_before_is_due(now, force=force):
+    overrides = load_date_overrides()
+    if not hour_before_is_due(now, force=force, date_overrides=overrides):
         return {"ok": True, "sent": [], "skipped": [{"reason": "not_due"}]}
-    if now.weekday() == 6:
+    slot = None
+    state = None
+    for key in ("sunday", "wednesday"):
+        candidate = get_slot_state(key, now, overrides)
+        game_day = datetime.fromisoformat(candidate["game_at"]).astimezone(TZ).date()
+        if game_day == now.date() and not candidate["is_ended"]:
+            slot = key
+            state = candidate
+            break
+    if not slot and force:
         slot = "sunday"
-    elif now.weekday() == 2:
-        slot = "wednesday"
-    else:
-        slot = "sunday" if force else None
+        state = get_slot_state(slot, now, overrides)
     if not slot:
         return {"ok": True, "sent": [], "skipped": [{"reason": "not_match_day"}]}
-    state = get_slot_state(slot, now)
     already = HourBeforeLog.query.filter_by(slot=slot, week_key=state["week_key"]).first()
     if already and not force:
         return {"ok": True, "sent": [], "skipped": [{"slot": slot, "reason": "already_sent"}]}
@@ -926,6 +979,7 @@ def run_hour_before_reminders(force: bool = False) -> dict:
 def public_state() -> dict:
     me = current_user()
     debt = unpaid_debt(me)
+    overrides = load_date_overrides()
     upcoming_games = []
     ended_games = []
     for slot in ("sunday", "wednesday"):
@@ -948,11 +1002,11 @@ def public_state() -> dict:
         if (debt["slot"], debt["week_key"]) not in have:
             ended_games.append(ended_game_payload(debt["slot"], debt["week_key"], me))
             ended_games.sort(key=lambda game: game["game_at"], reverse=True)
-    nxt = next_pay_reminder_at()
-    hour_before = next_hour_before_at()
-    match_at = todays_match_game_at()
-    upcoming = next_game_at()
-    target = banner_target()
+    nxt = next_pay_reminder_at(date_overrides=overrides)
+    hour_before = next_hour_before_at(date_overrides=overrides)
+    match_at = todays_match_game_at(date_overrides=overrides)
+    upcoming = next_game_at(date_overrides=overrides)
+    target = banner_target(date_overrides=overrides)
     warning = pay_warning_text(debt)
     return {
         "now": now_il().isoformat(),
@@ -964,6 +1018,7 @@ def public_state() -> dict:
         "games": upcoming_games,
         "past_games": ended_games,
         "players": FIXED_PLAYERS,
+        "users": booker_users(),
         "stats": attendance_stats(),
         "my_stats": my_stats(me),
         "enrollment_open": any(game.get("is_open") for game in upcoming_games),
@@ -972,8 +1027,8 @@ def public_state() -> dict:
         "pay_reminder_at_he": format_dt_he(nxt),
         "hour_before_at": hour_before.isoformat(),
         "hour_before_at_he": format_dt_he(hour_before),
-        "is_match_day": is_match_day(),
-        "banner_flash": banner_should_flash(),
+        "is_match_day": is_match_day(date_overrides=overrides),
+        "banner_flash": banner_should_flash(date_overrides=overrides),
         "banner_mode": target["mode"],
         "banner_at": target["at"],
         "banner_at_he": target["at_he"],
@@ -1324,8 +1379,50 @@ def admin_paid():
     return jsonify(payload)
 
 
+@app.post("/api/admin/game-date")
+@admin_required
+def admin_game_date():
+    data = request.get_json(silent=True) or {}
+    slot = (data.get("slot") or "").strip()
+    if slot not in ("sunday", "wednesday"):
+        return jsonify({"ok": False, "message": "משחק לא תקין"}), 400
+    state = sync_slot(slot)
+    if state["is_ended"]:
+        return jsonify({"ok": False, "message": "אי אפשר לשנות משחק שהסתיים"}), 400
+    settings = get_settings(slot, state["week_key"])
+    raw = " ".join(str(data.get("date") or "").split())
+    if not raw or raw == state["week_key"]:
+        settings.game_date = None
+        db.session.commit()
+        clear_date_overrides_cache()
+        payload = public_state()
+        payload.update({"ok": True, "message": "תאריך המשחק חזר לברירת המחדל"})
+        return jsonify(payload)
+    try:
+        chosen = date.fromisoformat(raw)
+    except ValueError:
+        return jsonify({"ok": False, "message": "תאריך לא תקין"}), 400
+    if now_il() >= datetime.combine(chosen, GAME_END_TIME, tzinfo=TZ):
+        return jsonify({"ok": False, "message": "אי אפשר לבחור תאריך שכבר הסתיים"}), 400
+    scheduled = date.fromisoformat(state["week_key"])
+    if abs((chosen - scheduled).days) > 21:
+        return jsonify({"ok": False, "message": "אפשר להזיז את המשחק עד 21 יום"}), 400
+    other = "wednesday" if slot == "sunday" else "sunday"
+    other_day = date.fromisoformat(sync_slot(other)["game_date"])
+    if chosen == other_day:
+        return jsonify({"ok": False, "message": "התאריך תפוס על ידי המשחק השני"}), 400
+    settings.game_date = chosen.isoformat()
+    db.session.commit()
+    clear_date_overrides_cache()
+    payload = public_state()
+    payload.update({"ok": True, "message": f"המשחק עבר ל־{format_dt_he(datetime.combine(chosen, GAME_TIME, tzinfo=TZ))}"})
+    return jsonify(payload)
+
+
 @app.post("/api/booker")
 def api_booker():
+    if not current_user() and not session.get("is_admin"):
+        return jsonify({"ok": False, "message": "יש להתחבר כדי לבחור מזמין"}), 401
     data = request.get_json(silent=True) or {}
     slot = (data.get("slot") or "").strip()
     if slot not in ("sunday", "wednesday"):
@@ -1333,6 +1430,31 @@ def api_booker():
 
     state = sync_slot(slot)
     settings = get_settings(slot, state["week_key"])
+    raw_user = data.get("user_id")
+    if raw_user not in (None, "", False):
+        try:
+            user_id = int(raw_user)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "message": "יש לבחור שחקן"}), 400
+        user = db.session.get(User, user_id)
+        if not user:
+            return jsonify({"ok": False, "message": "המשתמש לא נמצא"}), 404
+        display = canonical_player(user.name) or user.name
+        row = Enrollment.query.filter_by(
+            slot=slot, week_key=state["week_key"], user_id=user.id, is_waitlist=False
+        ).first()
+        if not row:
+            _, name_key = normalize_name(user.name)
+            row = Enrollment.query.filter_by(
+                slot=slot, week_key=state["week_key"], name_key=name_key, is_waitlist=False
+            ).first()
+        settings.booker_id = row.id if row else None
+        settings.booker_custom = None if row else display
+        db.session.commit()
+        payload = public_state()
+        payload.update({"ok": True, "message": f"{display} יזמין את המגרש"})
+        return jsonify(payload)
+
     player_id = data.get("player_id")
     if player_id in ("", False):
         player_id = None

@@ -1094,6 +1094,10 @@ select[data-booker] {
   margin: 0 0 8px;
 }
 
+.booker-custom[hidden] {
+  display: none;
+}
+
 .booker-custom input {
   flex: 1;
   min-width: 0;
@@ -1120,6 +1124,39 @@ select[data-booker] {
 }
 
 .admin-tools { margin-top: 10px; }
+
+.admin-date {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #bbf7d0;
+}
+
+.admin-date label {
+  display: block;
+  font-weight: 800;
+  color: #14532d;
+  margin: 0 0 6px;
+}
+
+.admin-date-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.admin-date input[type="date"] {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 2px solid #bbf7d0;
+  min-height: 48px;
+  background: white;
+  color: #14532d;
+}
 
 .field-head {
   display: flex;

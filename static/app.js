@@ -204,19 +204,44 @@ function renderFold(kind, game, title, subtitle, bodyHtml) {
   `;
 }
 
+const bookerCustomOpen = {};
+
+function bookerUsers() {
+  return state.users || [];
+}
+
+function bookerSelectValue(game) {
+  if (bookerCustomOpen[game.slot]) return "custom";
+  const users = bookerUsers();
+  if (game.booker_id) {
+    const player = (game.roster || []).find((p) => p.id === game.booker_id);
+    if (player && player.user_id) return `user:${player.user_id}`;
+  }
+  if (game.booker_name) {
+    const match = users.find((user) => user.name === game.booker_name);
+    if (match) return `user:${match.id}`;
+    return "custom";
+  }
+  return "";
+}
+
 function renderBookerPicker(game) {
   if (game.is_ended) return "";
-  const custom = !game.booker_id && game.booker_name ? game.booker_name : "";
+  if (!state.user && !state.is_admin) return "";
+  const selected = bookerSelectValue(game);
+  const showCustom = selected === "custom";
+  const custom = showCustom && !game.booker_id ? (game.booker_name || "") : "";
   return `
     <label class="booker-label">מי יזמין את המגרש</label>
     <select data-booker="${game.slot}">
       <option value="">בחרו מי יזמין את המגרש</option>
-      ${(game.roster || []).map((p) => `
-        <option value="${p.id}" ${game.booker_id === p.id ? "selected" : ""}>${esc(p.name)}</option>
+      ${bookerUsers().map((user) => `
+        <option value="user:${user.id}" ${selected === `user:${user.id}` ? "selected" : ""}>${esc(user.name)}</option>
       `).join("")}
+      <option value="custom" ${showCustom ? "selected" : ""}>שם אחר</option>
     </select>
-    <form class="booker-custom" data-booker-custom="${game.slot}">
-      <input type="text" maxlength="80" placeholder="או הזינו שם אחר" value="${esc(custom)}" autocomplete="name" />
+    <form class="booker-custom" data-booker-custom="${game.slot}" ${showCustom ? "" : "hidden"}>
+      <input type="text" maxlength="80" placeholder="שם המזמין" value="${esc(custom)}" autocomplete="name" />
       <button type="submit" class="tiny-btn">שמירה</button>
     </form>
   `;
@@ -345,6 +370,24 @@ function renderHistory(game) {
   `;
 }
 
+function renderAdminDate(game) {
+  if (!state.is_admin || game.is_ended) return "";
+  const value = game.game_date || (game.game_at || "").slice(0, 10);
+  const reset = game.date_override
+    ? `<button type="button" class="tiny-btn" data-date-reset="${game.slot}">חזרה למועד הרגיל</button>`
+    : "";
+  return `
+    <form class="admin-date" data-game-date="${game.slot}">
+      <label>תאריך המשחק</label>
+      <div class="admin-date-row">
+        <input type="date" value="${esc(value)}" required />
+        <button type="submit" class="tiny-btn">שמירה</button>
+      </div>
+      ${reset}
+    </form>
+  `;
+}
+
 function renderGame(game) {
   const statusClass = game.is_ended ? "ended" : game.is_open ? "open" : game.is_past ? "past" : "closed";
   const filled = (game.count / game.max_players) * 100;
@@ -384,6 +427,7 @@ function renderGame(game) {
       ${renderJoin(game)}
       ${renderFieldFold(game)}
       ${renderTeamsFold(game)}
+      ${state.is_admin && !game.is_ended ? renderAdminDate(game) : ""}
       ${state.is_admin ? `<div class="admin-tools"><button class="tiny-btn danger" data-clear="${game.slot}" type="button">ניקוי רשימה</button></div>` : ""}
     </article>
   `;
@@ -773,6 +817,7 @@ function renderMatchDay() {
         <h4>הגרלת זוגות</h4>
         ${renderTeams(game)}
       </div>
+      ${renderAdminDate(game)}
     </article>
   `;
 }
@@ -837,7 +882,7 @@ function render() {
   const warn = state.is_admin && state.persistent === false
     ? `<p class="persist-warn">כדי שהרשימות לא יימחקו בעדכון ב-Render, חברו מסד PostgreSQL והגדירו DATABASE_URL.</p>`
     : "";
-  const upcoming = upcomingGames().slice(0, 1);
+  const upcoming = state.is_admin ? upcomingGames() : upcomingGames().slice(0, 1);
   const past = state.past_games || (state.games || []).filter((game) => game.is_ended);
   if (gamesEl) gamesEl.innerHTML = warn + (upcoming.length ? upcoming.map(renderGame).join("") : `<p class="muted">אין משחק קרוב להרשמה.</p>`);
   if (pastGamesEl) {
@@ -927,6 +972,12 @@ async function onGameListClick(e) {
     payBtn.disabled = false;
     return;
   }
+  const dateReset = e.target.closest("[data-date-reset]");
+  if (dateReset) {
+    const data = await api("/api/admin/game-date", { slot: dateReset.dataset.dateReset, date: "" });
+    applyState(data);
+    return;
+  }
   const clearBtn = e.target.closest("[data-clear]");
   if (clearBtn) {
     if (!confirm("לנקות את כל הרשימה למשחק הזה?")) return;
@@ -936,22 +987,47 @@ async function onGameListClick(e) {
 }
 
 async function onBookerCustomSubmit(e) {
+  const dateForm = e.target.closest("[data-game-date]");
+  if (dateForm) {
+    e.preventDefault();
+    const input = dateForm.querySelector('input[type="date"]');
+    const data = await api("/api/admin/game-date", {
+      slot: dateForm.dataset.gameDate,
+      date: (input && input.value) || "",
+    });
+    applyState(data);
+    return;
+  }
   const form = e.target.closest("[data-booker-custom]");
   if (!form) return;
   e.preventDefault();
   const input = form.querySelector("input");
+  bookerCustomOpen[form.dataset.bookerCustom] = true;
   const data = await api("/api/booker", {
     slot: form.dataset.bookerCustom,
     name: (input && input.value) || "",
   });
+  if (data.ok) bookerCustomOpen[form.dataset.bookerCustom] = false;
   applyState(data);
 }
 
 async function onGameListChange(e) {
   const select = e.target.closest("[data-booker]");
   if (select) {
-    const playerId = select.value ? Number(select.value) : null;
-    const data = await api("/api/booker", { slot: select.dataset.booker, player_id: playerId });
+    const slot = select.dataset.booker;
+    if (select.value === "custom") {
+      bookerCustomOpen[slot] = true;
+      render();
+      const input = document.querySelector(`[data-booker-custom="${slot}"] input`);
+      if (input) input.focus();
+      return;
+    }
+    bookerCustomOpen[slot] = false;
+    const payload = { slot };
+    if (select.value.startsWith("user:")) {
+      payload.user_id = Number(select.value.slice(5));
+    }
+    const data = await api("/api/booker", payload);
     applyState(data);
     return;
   }
