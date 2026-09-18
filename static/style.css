@@ -1038,63 +1038,6 @@ body.login-only .top-banners {
 .join-row .muted { margin-bottom: 8px; }
 .welcome-card .primary-btn { width: 100%; }
 
-.mvp-block {
-  margin: 16px 0 4px;
-  padding-top: 14px;
-  border-top: 1px dashed #bbf7d0;
-}
-
-.mvp-game {
-  margin: 0 0 8px;
-  font-weight: 800;
-  color: #14532d;
-}
-
-.mvp-block .muted,
-.mvp-block .muted strong {
-  color: #14532d;
-}
-
-.mvp-picks {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.mvp-pick {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 52px;
-  padding: 10px 12px;
-  border: 2px solid #bbf7d0;
-  border-radius: 14px;
-  background: #ecfdf3;
-  color: #14532d;
-  font: inherit;
-  font-weight: 800;
-  text-align: right;
-  cursor: pointer;
-}
-
-.mvp-pick.selected {
-  border-color: #16a34a;
-  background: #dcfce7;
-}
-
-.mvp-initial {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: #14532d;
-  color: #fef08a;
-  font-size: 0.9rem;
-  flex: none;
-}
-
 .me-paid-btn {
   font: inherit;
   font-weight: 800;
@@ -1130,6 +1073,45 @@ body.login-only .top-banners {
 .booker-picked { margin: 0 0 10px; font-weight: 700; }
 .pay-list li.booker { background: #dbeafe; }
 .booker-tag { font-size: 0.78rem; color: #1d4ed8; font-weight: 800; }
+
+select[data-booker] {
+  width: 100%;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 2px solid #bbf7d0;
+  background: white;
+  min-height: 48px;
+  margin-bottom: 8px;
+}
+
+.booker-custom {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin: 0 0 8px;
+}
+
+.booker-custom input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 2px solid #bbf7d0;
+  background: white;
+  min-height: 48px;
+}
+
+.booker-custom button {
+  flex: none;
+  min-height: 48px;
+  padding: 8px 14px;
+}
 
 .wait-title {
   margin: 14px 0 8px;

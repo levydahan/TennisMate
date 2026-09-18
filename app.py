@@ -137,6 +137,7 @@ class GameSettings(db.Model):
     slot = db.Column(db.String(20), nullable=False)
     week_key = db.Column(db.String(16), nullable=False)
     booker_id = db.Column(db.Integer, nullable=True)
+    booker_custom = db.Column(db.String(80), nullable=True)
     teams_json = db.Column(db.Text, nullable=True)
     teams_ids = db.Column(db.String(200), nullable=True)
     teams2_json = db.Column(db.Text, nullable=True)
@@ -183,21 +184,6 @@ class HourBeforeLog(db.Model):
     )
 
 
-class MvpVote(db.Model):
-    __tablename__ = "mvp_votes"
-
-    id = db.Column(db.Integer, primary_key=True)
-    slot = db.Column(db.String(20), nullable=False, index=True)
-    week_key = db.Column(db.String(16), nullable=False, index=True)
-    voter_user_id = db.Column(db.Integer, nullable=False, index=True)
-    player_id = db.Column(db.Integer, nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
-
-    __table_args__ = (
-        db.UniqueConstraint("slot", "week_key", "voter_user_id", name="uq_mvp_voter_game"),
-    )
-
-
 class AppSetting(db.Model):
     __tablename__ = "app_settings"
 
@@ -236,6 +222,8 @@ def _ensure_schema():
                 conn.execute(text("ALTER TABLE game_settings ADD COLUMN teams2_json TEXT"))
             if "teams2_ids" not in columns:
                 conn.execute(text("ALTER TABLE game_settings ADD COLUMN teams2_ids VARCHAR(200)"))
+            if "booker_custom" not in columns:
+                conn.execute(text("ALTER TABLE game_settings ADD COLUMN booker_custom VARCHAR(80)"))
     if "users" in inspector.get_table_names():
         columns = {col["name"] for col in inspector.get_columns("users")}
         if "avatar" not in columns:
@@ -404,6 +392,23 @@ def roster_fingerprint(roster: list[dict]) -> str:
     return ",".join(str(player["id"]) for player in roster)
 
 
+def resolve_booker(settings: GameSettings | None, roster: list[dict]) -> tuple[int | None, str | None]:
+    if not settings:
+        return None, None
+    by_id = {player["id"]: player for player in roster}
+    if settings.booker_id and settings.booker_id in by_id:
+        player = by_id[settings.booker_id]
+        return player["id"], player["name"]
+    custom = (settings.booker_custom or "").strip()
+    if not custom:
+        return None, None
+    display = canonical_player(custom) or custom
+    match = next((player for player in roster if player["name"] == display), None)
+    if match:
+        return match["id"], match["name"]
+    return None, display
+
+
 def ensure_teams(
     slot: str, week_key: str, roster: list[dict], teams_ready: bool, rematch_ready: bool = False
 ) -> tuple[list | None, list | None]:
@@ -459,7 +464,7 @@ def players_payload(
         db.session.commit()
     n = len(roster)
     share = round(FIELD_COST_NIS / n, 2) if n else None
-    booker = next((player for player in roster if player["id"] == settings.booker_id), None)
+    booker_id, booker_name = resolve_booker(settings, roster)
     teams, teams2 = ensure_teams(slot, week_key, roster, teams_ready, rematch_ready)
     return {
         "roster": roster,
@@ -469,8 +474,8 @@ def players_payload(
         "spots_left": max(MAX_PLAYERS - n, 0),
         "share": share,
         "field_cost": FIELD_COST_NIS,
-        "booker_id": settings.booker_id,
-        "booker_name": booker["name"] if booker else None,
+        "booker_id": booker_id,
+        "booker_name": booker_name,
         "teams": teams,
         "teams2": teams2,
     }
@@ -552,9 +557,13 @@ def attendance_stats() -> dict:
                 arrived_names.add(canon)
                 roster_by_id[row.id] = canon
             settings = GameSettings.query.filter_by(slot=slot, week_key=week_key).first()
-            booker_name = None
-            if settings and settings.booker_id:
-                booker_name = roster_by_id.get(settings.booker_id)
+            booker_id, booker_name = resolve_booker(settings, [
+                {"id": row.id, "name": roster_by_id[row.id]}
+                for row in rows
+                if row.id in roster_by_id
+            ])
+            if booker_name:
+                booker_name = canonical_player(booker_name) or booker_name
             finished.append((week_key, slot, arrived_names, booker_name))
 
     finished.sort(key=lambda item: (item[0], item[1]))
@@ -624,7 +633,9 @@ def my_stats(me: User | None) -> dict | None:
                 None,
             )
             settings = GameSettings.query.filter_by(slot=slot, week_key=week_key).first()
-            is_booker = bool(mine and settings and settings.booker_id == mine.id)
+            roster = [{"id": row.id, "name": canonical_player(row.name) or row.name} for row in rows]
+            booker_id, booker_name = resolve_booker(settings, roster)
+            is_booker = bool(mine and (booker_id == mine.id or booker_name == my_name))
             if mine:
                 arrived += 1
                 if mine.paid or is_booker:
@@ -670,15 +681,12 @@ def history_for_slot(slot: str, current_week_key: str, exclude: str | None = Non
         settings = GameSettings.query.filter_by(slot=slot, week_key=week_key).first()
         teams = None
         teams2 = None
-        booker_name = None
         if settings:
             if settings.teams_json:
                 teams = json.loads(settings.teams_json)
             if getattr(settings, "teams2_json", None):
                 teams2 = json.loads(settings.teams2_json)
-            if settings.booker_id:
-                booker = next((p for p in roster if p["id"] == settings.booker_id), None)
-                booker_name = booker["name"] if booker else None
+        _booker_id, booker_name = resolve_booker(settings, roster)
         n = len(roster)
         history.append({
             "week_key": week_key,
@@ -752,54 +760,6 @@ def ended_game_payload(slot: str, week_key: str, me: User | None = None) -> dict
         "field_cost": FIELD_COST_NIS,
         **players,
         "history": [],
-    }
-
-
-def latest_ended_game(me: User | None = None) -> dict | None:
-    ended = []
-    for slot in ("sunday", "wednesday"):
-        state = get_slot_state(slot)
-        prev = state.get("prev_week_key")
-        if prev:
-            ended.append(ended_game_payload(slot, prev, me))
-    if not ended:
-        return None
-    ended.sort(key=lambda game: game["game_at"], reverse=True)
-    game = ended[0]
-    if game.get("roster"):
-        return game
-    return None
-
-
-def mvp_payload(me: User | None) -> dict | None:
-    game = latest_ended_game(me)
-    if not game:
-        return None
-    votes = MvpVote.query.filter_by(slot=game["slot"], week_key=game["week_key"]).all()
-    counts: dict[int, int] = {}
-    my_pick = None
-    for vote in votes:
-        counts[vote.player_id] = counts.get(vote.player_id, 0) + 1
-        if me and vote.voter_user_id == me.id:
-            my_pick = vote.player_id
-    by_id = {player["id"]: player for player in game["roster"]}
-    leader_id = max(counts, key=lambda pid: (counts[pid], -pid)) if counts else None
-    leader = by_id.get(leader_id) if leader_id else None
-    mine = by_id.get(my_pick) if my_pick else None
-    return {
-        "slot": game["slot"],
-        "week_key": game["week_key"],
-        "label_he": game["label_he"],
-        "game_at_he": game["game_at_he"],
-        "players": [
-            {"id": player["id"], "name": player["name"], "avatar": player.get("avatar")}
-            for player in game["roster"]
-        ],
-        "my_pick_id": my_pick,
-        "my_pick_name": mine["name"] if mine else None,
-        "leader_name": leader["name"] if leader else None,
-        "leader_votes": counts.get(leader_id, 0) if leader_id else 0,
-        "total_votes": len(votes),
     }
 
 
@@ -1007,7 +967,6 @@ def public_state() -> dict:
         "stats": attendance_stats(),
         "my_stats": my_stats(me),
         "enrollment_open": any(game.get("is_open") for game in upcoming_games),
-        "mvp": mvp_payload(me),
         "vapid_public_key": vapid_public_key(),
         "pay_reminder_at": nxt.isoformat(),
         "pay_reminder_at_he": format_dt_he(nxt),
@@ -1276,6 +1235,7 @@ def api_leave():
     settings = GameSettings.query.filter_by(slot=slot, week_key=state["week_key"]).first()
     if settings and settings.booker_id == row.id:
         settings.booker_id = None
+        settings.booker_custom = None
     db.session.delete(row)
     db.session.flush()
     promoted = None
@@ -1285,37 +1245,6 @@ def api_leave():
     message = "ההרשמה בוטלה"
     if promoted:
         message += f" · {promoted} עלה מההמתנה"
-    payload = public_state()
-    payload.update({"ok": True, "message": message})
-    return jsonify(payload)
-
-
-@app.post("/api/mvp")
-def api_mvp():
-    user = current_user()
-    if not user:
-        return jsonify({"ok": False, "message": "יש להתחבר"}), 401
-    data = request.get_json(silent=True) or {}
-    slot = (data.get("slot") or "").strip()
-    week_key = (data.get("week_key") or "").strip()
-    try:
-        player_id = int(data.get("player_id"))
-    except (TypeError, ValueError):
-        return jsonify({"ok": False, "message": "יש לבחור שחקן"}), 400
-    game = latest_ended_game(user)
-    if not game or game["slot"] != slot or game["week_key"] != week_key:
-        return jsonify({"ok": False, "message": "אפשר להצביע רק למשחק הקודם"}), 400
-    chosen = next((player for player in game["roster"] if player["id"] == player_id), None)
-    if not chosen:
-        return jsonify({"ok": False, "message": "אפשר לבחור רק שחקן שהגיע"}), 400
-    vote = MvpVote.query.filter_by(slot=slot, week_key=week_key, voter_user_id=user.id).first()
-    if vote:
-        vote.player_id = player_id
-        message = f"ההצבעה עודכנה · {chosen['name']}"
-    else:
-        db.session.add(MvpVote(slot=slot, week_key=week_key, voter_user_id=user.id, player_id=player_id))
-        message = f"הצבעת למצטיין · {chosen['name']}"
-    db.session.commit()
     payload = public_state()
     payload.update({"ok": True, "message": message})
     return jsonify(payload)
@@ -1399,32 +1328,60 @@ def admin_paid():
 def api_booker():
     data = request.get_json(silent=True) or {}
     slot = (data.get("slot") or "").strip()
-    player_id = data.get("player_id")
     if slot not in ("sunday", "wednesday"):
         return jsonify({"ok": False, "message": "משחק לא תקין"}), 400
 
     state = sync_slot(slot)
     settings = get_settings(slot, state["week_key"])
-    if not player_id:
-        settings.booker_id = None
+    player_id = data.get("player_id")
+    if player_id in ("", False):
+        player_id = None
+    if player_id is not None:
+        try:
+            player_id = int(player_id)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "message": "יש לבחור שחקן"}), 400
+    custom = " ".join(str(data.get("name") or "").split())
+    if len(custom) > 80:
+        custom = custom[:80].strip()
+
+    if player_id:
+        row = db.session.get(Enrollment, player_id)
+        if (
+            not row
+            or row.slot != slot
+            or row.week_key != state["week_key"]
+            or row.is_waitlist
+        ):
+            return jsonify({"ok": False, "message": "יש לבחור שחקן שנרשם למשחק"}), 400
+        settings.booker_id = row.id
+        settings.booker_custom = None
         db.session.commit()
         payload = public_state()
-        payload.update({"ok": True, "message": "בוטל מזמין המגרש"})
+        payload.update({"ok": True, "message": f"{row.name} יזמין את המגרש"})
         return jsonify(payload)
 
-    row = db.session.get(Enrollment, player_id)
-    if (
-        not row
-        or row.slot != slot
-        or row.week_key != state["week_key"]
-        or row.is_waitlist
-    ):
-        return jsonify({"ok": False, "message": "יש לבחור שחקן שנרשם למשחק"}), 400
+    if custom:
+        display = canonical_player(custom) or custom
+        roster = Enrollment.query.filter_by(
+            slot=slot, week_key=state["week_key"], is_waitlist=False
+        ).all()
+        match = next(
+            (row for row in roster if (canonical_player(row.name) or row.name) == display),
+            None,
+        )
+        settings.booker_id = match.id if match else None
+        settings.booker_custom = None if match else display
+        db.session.commit()
+        payload = public_state()
+        payload.update({"ok": True, "message": f"{display} יזמין את המגרש"})
+        return jsonify(payload)
 
-    settings.booker_id = row.id
+    settings.booker_id = None
+    settings.booker_custom = None
     db.session.commit()
     payload = public_state()
-    payload.update({"ok": True, "message": f"{row.name} יזמין את המגרש"})
+    payload.update({"ok": True, "message": "בוטל מזמין המגרש"})
     return jsonify(payload)
 
 

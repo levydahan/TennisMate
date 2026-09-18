@@ -204,28 +204,42 @@ function renderFold(kind, game, title, subtitle, bodyHtml) {
   `;
 }
 
+function renderBookerPicker(game) {
+  if (game.is_ended) return "";
+  const custom = !game.booker_id && game.booker_name ? game.booker_name : "";
+  return `
+    <label class="booker-label">מי יזמין את המגרש</label>
+    <select data-booker="${game.slot}">
+      <option value="">בחרו מי יזמין את המגרש</option>
+      ${(game.roster || []).map((p) => `
+        <option value="${p.id}" ${game.booker_id === p.id ? "selected" : ""}>${esc(p.name)}</option>
+      `).join("")}
+    </select>
+    <form class="booker-custom" data-booker-custom="${game.slot}">
+      <input type="text" maxlength="80" placeholder="או הזינו שם אחר" value="${esc(custom)}" autocomplete="name" />
+      <button type="submit" class="tiny-btn">שמירה</button>
+    </form>
+  `;
+}
+
 function renderFieldFold(game) {
   const subtitle = game.booker_name
     ? `${costSplit(game)} · ${game.booker_name}`
     : costSplit(game);
+  const picker = renderBookerPicker(game);
   let body;
   if (!game.roster.length) {
-    body = `<p class="share">${costSplit(game)}</p>`;
-  } else {
-    const select = game.is_ended
-      ? ""
-      : `
-        <label class="booker-label">מי יזמין את המגרש</label>
-        <select data-booker="${game.slot}">
-          <option value="">בחרו מי יזמין את המגרש</option>
-          ${game.roster.map((p) => `
-            <option value="${p.id}" ${game.booker_id === p.id ? "selected" : ""}>${esc(p.name)}</option>
-          `).join("")}
-        </select>
-      `;
     body = `
       <p class="share">${costSplit(game)}</p>
-      ${select}
+      ${picker}
+      ${game.booker_name
+        ? `<p class="booker-picked">המזמין: <strong>${esc(game.booker_name)}</strong></p>`
+        : `<p class="booker-picked muted">עדיין לא נבחר מזמין</p>`}
+    `;
+  } else {
+    body = `
+      <p class="share">${costSplit(game)}</p>
+      ${picker}
       ${game.booker_name
         ? `<p class="booker-picked">המזמין: <strong>${esc(game.booker_name)}</strong></p>`
         : `<p class="booker-picked muted">עדיין לא נבחר מזמין</p>`}
@@ -656,7 +670,6 @@ function renderHome() {
         <li><strong>${mine.booked || 0}</strong><span>הזמנות מגרש</span></li>
       </ul>
       ${cta}
-      ${renderMvpCard()}
       <button id="notifyBtn" class="ghost-btn notify-btn" type="button">${
         notifyOn ? "תזכורות תשלום פעילות" : "הפעלת תזכורת תשלום"
       }</button>
@@ -666,32 +679,6 @@ function renderHome() {
   if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
   const avatarInput = document.getElementById("avatarInput");
   if (avatarInput) avatarInput.addEventListener("change", onAvatarPicked);
-}
-
-let mvpOpen = false;
-
-function renderMvpCard() {
-  const poll = state.mvp;
-  if (!poll || !(poll.players || []).length) return "";
-  const picks = (poll.players || []).map((player) => `
-    <button type="button" class="mvp-pick${player.id === poll.my_pick_id ? " selected" : ""}" data-mvp-pick="${player.id}">
-      ${player.avatar
-        ? `<img class="row-avatar" src="${esc(player.avatar)}" alt="" />`
-        : `<span class="mvp-initial">${esc((player.name || "?").slice(0, 1))}</span>`}
-      <span>${esc(player.name)}</span>
-    </button>
-  `).join("");
-  const action = poll.my_pick_name ? "שינוי הצבעה" : "הצבעה למצטיין";
-  return `
-    <div class="mvp-block">
-      <p class="kicker">מצטיין המשחק</p>
-      <p class="mvp-game">${esc(poll.game_at_he)}</p>
-      ${poll.my_pick_name ? `<p class="muted">ההצבעה שלך: <strong>${esc(poll.my_pick_name)}</strong></p>` : `<p class="muted">בחרו שחקן אחד שהגיע למשחק הקודם.</p>`}
-      ${poll.leader_name ? `<p class="muted">מוביל: <strong>${esc(poll.leader_name)}</strong> · ${poll.leader_votes} ${poll.leader_votes === 1 ? "קול" : "קולות"}</p>` : ""}
-      <button class="primary-btn" data-mvp-toggle type="button">${mvpOpen ? "סגירה" : action}</button>
-      ${mvpOpen ? `<div class="mvp-picks">${picks}</div>` : ""}
-    </div>
-  `;
 }
 
 function resizeAvatar(file) {
@@ -757,17 +744,6 @@ function renderMatchDay() {
     ? `<h4 class="wait-title">רשימת המתנה</h4>
        <ul class="wait-list">${game.waiting.map((p, i) => renderPlayerRow(p, i, { waitlist: true, admin: state.is_admin })).join("")}</ul>`
     : "";
-  const bookerSelect = game.is_ended
-    ? ""
-    : `
-      <label class="booker-label">מי יזמין את המגרש</label>
-      <select data-booker="${game.slot}">
-        <option value="">בחרו מי יזמין את המגרש</option>
-        ${(game.roster || []).map((p) => `
-          <option value="${p.id}" ${game.booker_id === p.id ? "selected" : ""}>${esc(p.name)}</option>
-        `).join("")}
-      </select>
-    `;
   matchDayViewEl.innerHTML = `
     <article class="game-card match-day-card" data-slot="${game.slot}" data-week-key="${esc(game.week_key || "")}">
       <p class="kicker">יום המשחק</p>
@@ -788,7 +764,7 @@ function renderMatchDay() {
       <div class="match-day-block">
         <h4>מזמין המגרש</h4>
         <p class="share">${costSplit(game)}</p>
-        ${bookerSelect}
+        ${renderBookerPicker(game)}
         ${game.booker_name
           ? `<p class="booker-picked">המזמין: <strong>${esc(game.booker_name)}</strong></p>`
           : `<p class="booker-picked muted">עדיין לא נבחר מזמין</p>`}
@@ -959,6 +935,18 @@ async function onGameListClick(e) {
   }
 }
 
+async function onBookerCustomSubmit(e) {
+  const form = e.target.closest("[data-booker-custom]");
+  if (!form) return;
+  e.preventDefault();
+  const input = form.querySelector("input");
+  const data = await api("/api/booker", {
+    slot: form.dataset.bookerCustom,
+    name: (input && input.value) || "",
+  });
+  applyState(data);
+}
+
 async function onGameListChange(e) {
   const select = e.target.closest("[data-booker]");
   if (select) {
@@ -976,10 +964,12 @@ async function onGameListChange(e) {
 if (gamesEl) {
   gamesEl.addEventListener("click", onGameListClick);
   gamesEl.addEventListener("change", onGameListChange);
+  gamesEl.addEventListener("submit", onBookerCustomSubmit);
 }
 if (pastGamesEl) {
   pastGamesEl.addEventListener("click", onGameListClick);
   pastGamesEl.addEventListener("change", onGameListChange);
+  pastGamesEl.addEventListener("submit", onBookerCustomSubmit);
 }
 
 statsListsEl.addEventListener("click", async (e) => {
@@ -1333,33 +1323,15 @@ initTabs();
 const payWarnBtn = document.getElementById("payWarn");
 if (payWarnBtn) payWarnBtn.addEventListener("click", scrollToUnpaidGame);
 if (homeViewEl) {
-  homeViewEl.addEventListener("click", async (e) => {
+  homeViewEl.addEventListener("click", (e) => {
     const go = e.target.closest("[data-go-tab]");
-    if (go) {
-      setTab(go.dataset.goTab);
-      return;
-    }
-    const toggle = e.target.closest("[data-mvp-toggle]");
-    if (toggle) {
-      mvpOpen = !mvpOpen;
-      renderHome();
-      return;
-    }
-    const pick = e.target.closest("[data-mvp-pick]");
-    if (!pick || !state.mvp) return;
-    pick.disabled = true;
-    const data = await api("/api/mvp", {
-      slot: state.mvp.slot,
-      week_key: state.mvp.week_key,
-      player_id: Number(pick.dataset.mvpPick),
-    });
-    mvpOpen = false;
-    applyState(data);
+    if (go) setTab(go.dataset.goTab);
   });
 }
 if (matchDayViewEl) {
   matchDayViewEl.addEventListener("click", onGameListClick);
   matchDayViewEl.addEventListener("change", onGameListChange);
+  matchDayViewEl.addEventListener("submit", onBookerCustomSubmit);
 }
 
 if ("serviceWorker" in navigator) {
