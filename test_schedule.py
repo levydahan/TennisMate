@@ -25,19 +25,28 @@ class SundayEnrollmentTests(unittest.TestCase):
         self.assertTrue(state["is_open"])
         self.assertTrue(state["teams_ready"])
 
+    def test_still_open_after_game_start(self):
+        now = datetime(2026, 8, 30, 20, 0, tzinfo=TZ)
+        state = get_slot_state("sunday", now)
+        self.assertTrue(state["is_open"])
+        self.assertTrue(state["is_past"])
+        self.assertFalse(state["is_ended"])
+        self.assertEqual(state["week_key"], "2026-08-30")
+        self.assertIn("22:00", state["status_detail"])
+
+    def test_enroll_closes_at_2200(self):
+        still = get_slot_state("sunday", datetime(2026, 8, 30, 21, 59, tzinfo=TZ))
+        self.assertTrue(still["is_open"])
+        closed = get_slot_state("sunday", datetime(2026, 8, 30, 22, 0, tzinfo=TZ))
+        self.assertFalse(closed["is_open"])
+        self.assertTrue(closed["is_past"])
+        self.assertFalse(closed["is_ended"])
+
     def test_teams_not_ready_before_1959(self):
         now = datetime(2026, 8, 30, 19, 58, tzinfo=TZ)
         state = get_slot_state("sunday", now)
         self.assertTrue(state["is_open"])
         self.assertFalse(state["teams_ready"])
-
-    def test_closes_at_game_start(self):
-        now = datetime(2026, 8, 30, 20, 0, tzinfo=TZ)
-        state = get_slot_state("sunday", now)
-        self.assertFalse(state["is_open"])
-        self.assertTrue(state["is_past"])
-        self.assertFalse(state["is_ended"])
-        self.assertEqual(state["week_key"], "2026-08-30")
 
     def test_stays_on_same_week_until_2201(self):
         now = datetime(2026, 8, 30, 22, 0, tzinfo=TZ)
@@ -68,8 +77,14 @@ class WednesdayEnrollmentTests(unittest.TestCase):
         state = get_slot_state("wednesday", now)
         self.assertFalse(state["is_open"])
 
-    def test_closes_wednesday_2000(self):
+    def test_still_open_wednesday_after_kickoff(self):
         now = datetime(2026, 8, 26, 20, 0, tzinfo=TZ)
+        state = get_slot_state("wednesday", now)
+        self.assertTrue(state["is_open"])
+        self.assertTrue(state["is_past"])
+
+    def test_closes_wednesday_2200(self):
+        now = datetime(2026, 8, 26, 22, 0, tzinfo=TZ)
         state = get_slot_state("wednesday", now)
         self.assertFalse(state["is_open"])
         self.assertTrue(state["is_past"])

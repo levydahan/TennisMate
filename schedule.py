@@ -15,6 +15,7 @@ REMATCH_TIME = time(21, 0)
 PAY_REMIND_TIME = time(21, 1)
 GAME_END_TIME = time(22, 1)
 ENROLL_OPEN_TIME = time(21, 30)
+ENROLL_CLOSE_TIME = time(22, 0)
 MAX_PLAYERS = 6
 FIELD_COST_NIS = 60
 TEAM_LETTERS = "אבגדהו"
@@ -249,9 +250,9 @@ def draw_rematch(players: list, hour1_teams: list | None, rng: random.Random | N
 def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
     """Return the visible upcoming game cycle for a slot.
 
-    Enrollment windows (unchanged):
-      Sunday game    — Thursday 21:30 until Sunday 20:00
-      Wednesday game — Monday 21:30 until Wednesday 20:00
+    Enrollment windows:
+      Sunday game    — Thursday 21:30 until Sunday 22:00
+      Wednesday game — Monday 21:30 until Wednesday 22:00
 
     The displayed week rolls to the next occurrence at 22:01 Israel time.
     The just-ended week is exposed as prev_week_key.
@@ -281,6 +282,7 @@ def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
 
     game_dt = datetime.combine(week_date, GAME_TIME, tzinfo=TZ)
     game_end_dt = datetime.combine(week_date, GAME_END_TIME, tzinfo=TZ)
+    enroll_close_dt = datetime.combine(week_date, ENROLL_CLOSE_TIME, tzinfo=TZ)
     open_dt = datetime.combine(
         week_date - timedelta(days=spec["open_days_before"]),
         ENROLL_OPEN_TIME,
@@ -288,7 +290,7 @@ def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
     )
     prev_end_dt = datetime.combine(prev_week_date, GAME_END_TIME, tzinfo=TZ)
 
-    is_open = open_dt <= now < game_dt
+    is_open = open_dt <= now < enroll_close_dt
     is_ended = now >= game_end_dt
     is_past = now >= game_dt
 
@@ -299,7 +301,7 @@ def get_slot_state(slot_key: str, now: datetime | None = None) -> dict:
 
     if is_open:
         status_he = "ההרשמה פתוחה"
-        status_detail = f"פתוחה עד {format_dt_he(game_dt)}"
+        status_detail = f"פתוחה עד {format_dt_he(enroll_close_dt)}"
     elif is_ended:
         status_he = "המשחק הסתיים"
         status_detail = f"הרשמה חדשה ב־{format_dt_he(open_dt)}"
