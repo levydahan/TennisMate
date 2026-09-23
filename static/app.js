@@ -1522,3 +1522,268 @@ if (localStorage.getItem("tm-notify") === "1" && "Notification" in window && Not
 refresh();
 setInterval(refresh, 30000);
 setInterval(tickCountdown, 1000);
+
+const PONG_WIN = 3;
+let racketClicks = 0;
+let pong = null;
+
+function pongEls() {
+  return {
+    overlay: document.getElementById("pongOverlay"),
+    canvas: document.getElementById("pongCourt"),
+    score: document.getElementById("pongScore"),
+    end: document.getElementById("pongEnd"),
+    winner: document.getElementById("pongWinner"),
+    closeBtn: document.getElementById("pongClose"),
+    againBtn: document.getElementById("pongAgain"),
+  };
+}
+
+function startRockyTheme() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return { stop() {} };
+  const ctx = new AudioCtx();
+  const master = ctx.createGain();
+  master.gain.value = 0.16;
+  master.connect(ctx.destination);
+  const step = 0.22;
+  const motif = [261.63, 311.13, 349.23, 392, 349.23, 311.13, 261.63, 196];
+  const bass = [130.81, 130.81, 155.56, 174.61];
+  let alive = true;
+
+  function brass(time, freq, dur, vol) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(freq, time);
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(900, time);
+    filter.frequency.linearRampToValueAtTime(1400, time + dur * 0.3);
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.exponentialRampToValueAtTime(vol, time + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(master);
+    osc.start(time);
+    osc.stop(time + dur + 0.02);
+  }
+
+  function loop(from) {
+    if (!alive) return;
+    motif.forEach((freq, i) => brass(from + i * step, freq, 0.2, 0.22));
+    bass.forEach((freq, i) => brass(from + i * step * 2, freq, 0.38, 0.12));
+    const next = from + motif.length * step;
+    const wait = Math.max(20, (next - ctx.currentTime) * 1000 - 40);
+    setTimeout(() => loop(Math.max(ctx.currentTime + 0.02, next)), wait);
+  }
+
+  if (ctx.state === "suspended") ctx.resume().catch(() => {});
+  loop(ctx.currentTime + 0.05);
+  return {
+    stop() {
+      alive = false;
+      try {
+        master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
+      } catch (e) {}
+      setTimeout(() => {
+        try { ctx.close(); } catch (err) {}
+      }, 180);
+    },
+  };
+}
+
+function newPongState(canvas) {
+  const w = canvas.width;
+  const h = canvas.height;
+  return {
+    w,
+    h,
+    ball: { x: w / 2, y: h / 2, vx: 3.2 * (Math.random() < 0.5 ? 1 : -1), vy: 3.6 },
+    player: { x: w / 2, y: h - 18, w: 72, h: 8 },
+    ai: { x: w / 2, y: 14, w: 72, h: 8 },
+    you: 0,
+    pc: 0,
+    over: false,
+    keys: { left: false, right: false },
+  };
+}
+
+function serveBall(game, towardPlayer) {
+  const dir = Math.random() < 0.5 ? -1 : 1;
+  game.ball.x = game.w / 2;
+  game.ball.y = game.h / 2;
+  game.ball.vx = 3.1 * dir;
+  game.ball.vy = towardPlayer ? 3.5 : -3.5;
+}
+
+function hitPaddle(ball, paddle) {
+  return (
+    ball.x >= paddle.x - paddle.w / 2
+    && ball.x <= paddle.x + paddle.w / 2
+    && ball.y >= paddle.y - paddle.h / 2 - 6
+    && ball.y <= paddle.y + paddle.h / 2 + 6
+  );
+}
+
+function drawPong(ctx, game) {
+  ctx.fillStyle = "#052e16";
+  ctx.fillRect(0, 0, game.w, game.h);
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.setLineDash([8, 10]);
+  ctx.beginPath();
+  ctx.moveTo(12, game.h / 2);
+  ctx.lineTo(game.w - 12, game.h / 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = "#ecfdf3";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(6, 6, game.w - 12, game.h - 12);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(game.player.x - game.player.w / 2, game.player.y - game.player.h / 2, game.player.w, game.player.h);
+  ctx.fillRect(game.ai.x - game.ai.w / 2, game.ai.y - game.ai.h / 2, game.ai.w, game.ai.h);
+  ctx.beginPath();
+  ctx.arc(game.ball.x, game.ball.y, 6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function updatePongScore() {
+  const { score } = pongEls();
+  if (!pong || !score) return;
+  score.textContent = `אתה ${pong.you} · ${pong.pc} מחשב`;
+}
+
+function finishPong() {
+  if (!pong) return;
+  pong.over = true;
+  const { end, winner } = pongEls();
+  if (winner) winner.textContent = pong.you >= PONG_WIN ? "ניצחת" : "המחשב ניצח";
+  if (end) end.hidden = false;
+}
+
+function stepPong() {
+  if (!pong || pong.over) return;
+  const speed = 6.4;
+  if (pong.keys.left) pong.player.x -= speed;
+  if (pong.keys.right) pong.player.x += speed;
+  pong.player.x = Math.max(pong.player.w / 2 + 8, Math.min(pong.w - pong.player.w / 2 - 8, pong.player.x));
+
+  const follow = pong.ball.x - pong.ai.x;
+  pong.ai.x += Math.max(-4.2, Math.min(4.2, follow * 0.09));
+  pong.ai.x = Math.max(pong.ai.w / 2 + 8, Math.min(pong.w - pong.ai.w / 2 - 8, pong.ai.x));
+
+  pong.ball.x += pong.ball.vx;
+  pong.ball.y += pong.ball.vy;
+  if (pong.ball.x < 12 || pong.ball.x > pong.w - 12) pong.ball.vx *= -1;
+
+  if (pong.ball.vy > 0 && hitPaddle(pong.ball, pong.player)) {
+    pong.ball.vy = -Math.abs(pong.ball.vy) - 0.15;
+    pong.ball.vx += (pong.ball.x - pong.player.x) * 0.12;
+    pong.ball.y = pong.player.y - 12;
+  } else if (pong.ball.vy < 0 && hitPaddle(pong.ball, pong.ai)) {
+    pong.ball.vy = Math.abs(pong.ball.vy) + 0.12;
+    pong.ball.vx += (pong.ball.x - pong.ai.x) * 0.1;
+    pong.ball.y = pong.ai.y + 12;
+  }
+
+  if (pong.ball.y > pong.h) {
+    pong.pc += 1;
+    updatePongScore();
+    if (pong.pc >= PONG_WIN) finishPong();
+    else serveBall(pong, false);
+  } else if (pong.ball.y < 0) {
+    pong.you += 1;
+    updatePongScore();
+    if (pong.you >= PONG_WIN) finishPong();
+    else serveBall(pong, true);
+  }
+}
+
+function loopPong() {
+  if (!pong) return;
+  const { canvas } = pongEls();
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  stepPong();
+  drawPong(ctx, pong);
+  pong.raf = requestAnimationFrame(loopPong);
+}
+
+function movePongFromPointer(event) {
+  if (!pong) return;
+  const { canvas } = pongEls();
+  const box = canvas.getBoundingClientRect();
+  const x = ((event.clientX - box.left) / box.width) * pong.w;
+  pong.player.x = Math.max(pong.player.w / 2 + 8, Math.min(pong.w - pong.player.w / 2 - 8, x));
+}
+
+function closePong() {
+  const { overlay, end } = pongEls();
+  if (pong) {
+    cancelAnimationFrame(pong.raf);
+    if (pong.theme) pong.theme.stop();
+  }
+  pong = null;
+  if (end) end.hidden = true;
+  if (overlay) overlay.hidden = true;
+}
+
+function startPongMatch() {
+  const { canvas, overlay, end } = pongEls();
+  if (!canvas || !overlay) return;
+  if (pong && pong.theme) pong.theme.stop();
+  cancelAnimationFrame(pong && pong.raf);
+  pong = newPongState(canvas);
+  pong.theme = startRockyTheme();
+  if (end) end.hidden = true;
+  overlay.hidden = false;
+  updatePongScore();
+  loopPong();
+}
+
+function openPong() {
+  racketClicks = 0;
+  startPongMatch();
+}
+
+function onPongKey(e, down) {
+  if (!pong) return;
+  if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") pong.keys.left = down;
+  if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") pong.keys.right = down;
+}
+
+function initPongEgg() {
+  const mark = document.getElementById("brandMark");
+  const { overlay, canvas, closeBtn, againBtn } = pongEls();
+  if (mark) {
+    mark.addEventListener("click", () => {
+      racketClicks += 1;
+      if (racketClicks >= 10) openPong();
+    });
+  }
+  if (closeBtn) closeBtn.addEventListener("click", closePong);
+  if (againBtn) againBtn.addEventListener("click", startPongMatch);
+  if (overlay) {
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closePong();
+    });
+  }
+  if (canvas) {
+    let dragging = false;
+    canvas.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      canvas.setPointerCapture(e.pointerId);
+      movePongFromPointer(e);
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      if (dragging) movePongFromPointer(e);
+    });
+    canvas.addEventListener("pointerup", () => { dragging = false; });
+    canvas.addEventListener("pointercancel", () => { dragging = false; });
+  }
+  window.addEventListener("keydown", (e) => onPongKey(e, true));
+  window.addEventListener("keyup", (e) => onPongKey(e, false));
+}
+
+initPongEgg();

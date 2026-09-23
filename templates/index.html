@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=35" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=36" />
 </head>
 <body class="login-only">
   <div id="topBanners" class="top-banners">
@@ -25,7 +25,9 @@
   <div class="page login-only">
   <header class="topbar">
     <div class="brand">
-      <img class="brand-icon" src="{{ url_for('static', filename='racket.svg') }}" alt="" width="44" height="44" />
+      <button type="button" class="brand-mark" id="brandMark" aria-label="טניסמייט">
+        <img class="brand-icon" src="{{ url_for('static', filename='racket.svg') }}" alt="" width="44" height="44" />
+      </button>
       <div>
         <h1>טניסמייט</h1>
         <p>משחקים פעמיים בשבוע · 20:00</p>
@@ -100,6 +102,22 @@
   </main>
   </div>
 
+  <div id="pongOverlay" class="pong-overlay" hidden>
+    <div class="pong-panel">
+      <div class="pong-head">
+        <h2>שחקת טניס</h2>
+        <button type="button" class="ghost-btn" id="pongClose">סגור</button>
+      </div>
+      <p id="pongScore" class="pong-score">אתה 0 · 0 מחשב</p>
+      <canvas id="pongCourt" width="320" height="440"></canvas>
+      <p class="pong-hint">הזיזו את הקו בתחתית · שמאל / ימין</p>
+      <div id="pongEnd" class="pong-end" hidden>
+        <p id="pongWinner"></p>
+        <button type="button" class="primary-btn" id="pongAgain">שוב</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast" hidden></div>
 
   <dialog id="adminDialog" class="dialog">
@@ -114,6 +132,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=36"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=37"></script>
 </body>
 </html>
