@@ -659,6 +659,86 @@ class JoinAndWaitlistTests(unittest.TestCase):
             self.assertEqual(sunday["game_date"], "2026-08-30")
             self.assertFalse(sunday["date_override"])
 
+    def test_admin_can_edit_time_location_price_and_nav(self):
+        frozen = datetime(2026, 8, 27, 22, 0, tzinfo=TZ)
+        with patch("schedule.now_il", return_value=frozen), patch("app.now_il", return_value=frozen):
+            denied = self.client.post("/api/admin/game-settings", json={
+                "slot": "sunday",
+                "time": "18:30",
+                "location": "פארק הירקון",
+                "nav_address": "נמל תל אביב",
+                "field_cost": 90,
+            })
+            self.assertEqual(denied.status_code, 401)
+            self._login_admin()
+            updated = self.client.post("/api/admin/game-settings", json={
+                "slot": "sunday",
+                "date": "2026-08-31",
+                "time": "18:30",
+                "location": "פארק הירקון",
+                "nav_address": "נמל תל אביב",
+                "field_cost": 90,
+            })
+            data = updated.get_json()
+            self.assertTrue(data["ok"], data)
+            sunday = self._game(data, "sunday")
+            self.assertEqual(sunday["game_date"], "2026-08-31")
+            self.assertEqual(sunday["game_time"], "18:30")
+            self.assertTrue(sunday["time_override"])
+            self.assertEqual(sunday["location"], "פארק הירקון")
+            self.assertEqual(sunday["nav_address"], "נמל תל אביב")
+            self.assertEqual(sunday["field_cost"], 90)
+            self.assertIn("18:30", sunday["game_at_he"])
+            self.client.post("/api/join", json={"slot": "sunday", "name": "לוי"})
+            self.client.post("/api/join", json={"slot": "sunday", "name": "שירן"})
+            sunday = self._game(self.client.get("/api/state").get_json(), "sunday")
+            self.assertEqual(sunday["share"], 45)
+
+    def test_admin_can_edit_past_game_settings(self):
+        frozen = datetime(2026, 8, 31, 12, 0, tzinfo=TZ)
+        with patch("schedule.now_il", return_value=frozen), patch("app.now_il", return_value=frozen):
+            self._login_admin()
+            with app.app_context():
+                db.session.add(Enrollment(
+                    slot="sunday",
+                    week_key="2026-08-30",
+                    name="לוי",
+                    name_key="לוי",
+                    is_waitlist=False,
+                ))
+                db.session.add(Enrollment(
+                    slot="sunday",
+                    week_key="2026-08-30",
+                    name="שירן",
+                    name_key="שירן",
+                    is_waitlist=False,
+                ))
+                db.session.commit()
+            updated = self.client.post("/api/admin/game-settings", json={
+                "slot": "sunday",
+                "week_key": "2026-08-30",
+                "date": "2026-08-29",
+                "time": "19:15",
+                "location": "הוד השרון",
+                "nav_address": "רחוב סוקולוב 1 הוד השרון",
+                "field_cost": 80,
+            })
+            data = updated.get_json()
+            self.assertTrue(data["ok"], data)
+            past = self._game(data, "sunday", ended=True)
+            self.assertIsNotNone(past)
+            self.assertEqual(past["week_key"], "2026-08-30")
+            self.assertEqual(past["game_date"], "2026-08-29")
+            self.assertEqual(past["game_time"], "19:15")
+            self.assertEqual(past["location"], "הוד השרון")
+            self.assertEqual(past["nav_address"], "רחוב סוקולוב 1 הוד השרון")
+            self.assertEqual(past["field_cost"], 80)
+            self.assertEqual(past["share"], 40)
+            current = self._game(data, "sunday")
+            self.assertEqual(current["week_key"], "2026-09-06")
+            self.assertEqual(current["field_cost"], 60)
+            self.assertIsNone(current.get("nav_address"))
+
 
 if __name__ == "__main__":
     unittest.main()

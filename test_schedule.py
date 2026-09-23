@@ -279,6 +279,22 @@ class DateOverrideTests(unittest.TestCase):
         self.assertFalse(hour_before_is_due(datetime(2026, 8, 30, 19, 0, tzinfo=TZ), date_overrides=overrides))
         self.assertTrue(hour_before_is_due(datetime(2026, 8, 31, 19, 0, tzinfo=TZ), date_overrides=overrides))
 
+    def test_time_override_shifts_kickoff_and_end(self):
+        from datetime import time
+        now = datetime(2026, 8, 27, 22, 0, tzinfo=TZ)
+        times = {("sunday", "2026-08-30"): time(18, 30)}
+        state = get_slot_state("sunday", now, time_overrides=times)
+        self.assertEqual(state["week_key"], "2026-08-30")
+        self.assertEqual(state["game_time"], "18:30")
+        self.assertTrue(state["time_override"])
+        self.assertIn("18:30", state["game_at_he"])
+        live = get_slot_state("sunday", datetime(2026, 8, 30, 20, 0, tzinfo=TZ), time_overrides=times)
+        self.assertEqual(live["week_key"], "2026-08-30")
+        self.assertTrue(live["is_past"])
+        self.assertFalse(live["is_ended"])
+        rolled = get_slot_state("sunday", datetime(2026, 8, 30, 20, 31, tzinfo=TZ), time_overrides=times)
+        self.assertEqual(rolled["week_key"], "2026-09-06")
+
 
 if __name__ == "__main__":
     unittest.main()

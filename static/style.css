@@ -1125,6 +1125,75 @@ select[data-booker] {
 
 .admin-tools { margin-top: 10px; }
 
+.game-head-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.waze-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #e0f7ff;
+  border: 2px solid #7dd3fc;
+  box-shadow: 0 2px 0 #0ea5e9;
+  text-decoration: none;
+}
+
+.waze-btn:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.meta.location {
+  margin-top: 2px;
+  font-weight: 700;
+}
+
+.admin-field {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #bbf7d0;
+  display: grid;
+  gap: 10px;
+}
+
+.admin-field-title {
+  margin: 0;
+  font-weight: 800;
+  color: #14532d;
+}
+
+.admin-field label {
+  display: grid;
+  gap: 6px;
+  font-weight: 800;
+  color: #14532d;
+}
+
+.admin-field input {
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 2px solid #bbf7d0;
+  min-height: 48px;
+  background: white;
+  color: #14532d;
+}
+
+.admin-field-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .admin-date {
   margin-top: 12px;
   padding-top: 12px;

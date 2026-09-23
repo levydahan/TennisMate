@@ -43,16 +43,50 @@ function esc(text) {
   return d.innerHTML;
 }
 
-function shareText(share) {
-  if (share == null) return "אין עדיין שחקנים — עלות המגרש 60 ₪";
+function fieldCost(game) {
+  const cost = game && game.field_cost != null ? Number(game.field_cost) : 60;
+  return Number.isFinite(cost) ? cost : 60;
+}
+
+function shareText(share, game) {
+  const cost = fieldCost(game);
+  if (share == null) return `אין עדיין שחקנים — עלות המגרש ${cost} ₪`;
   const nice = Number.isInteger(share) ? String(share) : share.toFixed(2);
   return `${nice} ₪ לכל שחקן`;
 }
 
 function costSplit(game) {
-  if (!game.count) return "אין נרשמים עדיין · 60 ₪ על המגרש";
+  const cost = fieldCost(game);
+  if (!game.count) return `אין נרשמים עדיין · ${cost} ₪ על המגרש`;
   const nice = Number.isInteger(game.share) ? String(game.share) : game.share.toFixed(2);
-  return `60 ₪ ÷ ${game.count} = ${nice} ₪ לכל שחקן`;
+  return `${cost} ₪ ÷ ${game.count} = ${nice} ₪ לכל שחקן`;
+}
+
+function formatGameClock(game, extraHours = 0) {
+  if (!game || !game.game_at) return extraHours ? "21:00" : "20:00";
+  const start = new Date(game.game_at);
+  if (Number.isNaN(start.getTime())) return extraHours ? "21:00" : "20:00";
+  const d = new Date(start.getTime() + extraHours * 60 * 60 * 1000);
+  return d.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function wazeHref(address) {
+  const q = encodeURIComponent(address);
+  return `https://waze.com/ul?q=${q}&navigate=yes`;
+}
+
+function wazeButton(game) {
+  const address = (game.nav_address || "").trim();
+  if (!address) return "";
+  const title = game.location ? `ניווט ב־Waze אל ${game.location}` : "ניווט ב־Waze אל המגרש";
+  return `
+    <a class="waze-btn" data-waze href="${esc(wazeHref(address))}" target="_blank" rel="noopener noreferrer" aria-label="${esc(title)}" title="${esc(title)}">
+      <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
+        <circle cx="16" cy="16" r="15" fill="#33ccff"/>
+        <path fill="#0b3d5c" d="M16 6.2c-4.6 0-8.3 3.5-8.3 8.1 0 4.8 6.7 11.5 8.3 11.5s8.3-6.7 8.3-11.5c0-4.6-3.7-8.1-8.3-8.1zm0 11.2a3.1 3.1 0 1 1 0-6.2 3.1 3.1 0 0 1 0 6.2z"/>
+      </svg>
+    </a>
+  `;
 }
 
 function renderPlayerRow(player, index, { waitlist = false, admin = false, game = null } = {}) {
@@ -162,13 +196,13 @@ function renderTeams(game) {
   }
   const hour2 = game.rematch_ready && game.teams2 && game.teams2.length
     ? `<div class="teams">
-         <h4>שעה שנייה · 21:00</h4>
+         <h4>שעה שנייה · ${esc(formatGameClock(game, 1))}</h4>
          ${renderTeamGrid(game.teams2)}
        </div>`
-    : `<p class="draw-note">ב־${esc(game.rematch_at_he || "21:00")} הגרלה מחדש — בלי אותם זוגות</p>`;
+    : `<p class="draw-note">ב־${esc(game.rematch_at_he || formatGameClock(game, 1))} הגרלה מחדש — בלי אותם זוגות</p>`;
   return `
     <div class="teams">
-      <h4>שעה ראשונה · 20:00</h4>
+      <h4>שעה ראשונה · ${esc(formatGameClock(game))}</h4>
       ${renderTeamGrid(game.teams)}
     </div>
     ${hour2}
@@ -273,7 +307,7 @@ function renderFieldFold(game) {
           <li class="${p.paid ? "paid" : ""} ${game.booker_id === p.id ? "booker" : ""}">
             <span>${esc(p.name)}${game.booker_id === p.id ? ' <span class="booker-tag">מזמין</span>' : ""}</span>
             <span class="pay-right">
-              ${shareText(game.share)}${p.paid ? ' <span class="paid-tag">שולם</span>' : ""}
+              ${shareText(game.share, game)}${p.paid ? ' <span class="paid-tag">שולם</span>' : ""}
               ${p.is_me ? bitPayButton(game, p) : ""}
               ${p.is_me && !p.paid ? `<button class="me-paid-btn" data-me-paid="${p.id}" type="button">סימנתי ששילמתי</button>` : ""}
             </span>
@@ -290,7 +324,7 @@ function renderTeamsFold(game) {
   if (game.teams_ready && game.teams && game.teams.length) {
     subtitle = game.rematch_ready && game.teams2 && game.teams2.length
       ? "שעה ראשונה ושנייה"
-      : "שעה ראשונה · 20:00";
+      : `שעה ראשונה · ${formatGameClock(game)}`;
   } else if (!game.teams_ready && game.draw_at_he) {
     subtitle = `ב־${game.draw_at_he}`;
   }
@@ -371,19 +405,44 @@ function renderHistory(game) {
 }
 
 function renderAdminDate(game) {
-  if (!state.is_admin || game.is_ended) return "";
-  const value = game.game_date || (game.game_at || "").slice(0, 10);
-  const reset = game.date_override
-    ? `<button type="button" class="tiny-btn" data-date-reset="${game.slot}">חזרה למועד הרגיל</button>`
+  if (!state.is_admin) return "";
+  const dateVal = game.game_date || (game.game_at || "").slice(0, 10);
+  const timeVal = game.game_time || (game.game_at || "").slice(11, 16) || "20:00";
+  const location = game.location || "";
+  const nav = game.nav_address || "";
+  const cost = fieldCost(game);
+  const hasOverride = Boolean(
+    game.date_override
+    || game.time_override
+    || location
+    || nav
+    || (game.field_cost != null && Number(game.field_cost) !== 60)
+  );
+  const reset = hasOverride
+    ? `<button type="button" class="tiny-btn" data-field-reset="${esc(game.slot)}" data-week-key="${esc(game.week_key || "")}">חזרה לברירת מחדל</button>`
     : "";
   return `
-    <form class="admin-date" data-game-date="${game.slot}">
-      <label>תאריך המשחק</label>
-      <div class="admin-date-row">
-        <input type="date" value="${esc(value)}" required />
+    <form class="admin-field" data-game-settings="${esc(game.slot)}" data-week-key="${esc(game.week_key || "")}">
+      <p class="admin-field-title">פרטי המגרש</p>
+      <label>תאריך המשחק
+        <input type="date" name="date" value="${esc(dateVal)}" required />
+      </label>
+      <label>שעה
+        <input type="time" name="time" value="${esc(timeVal)}" required />
+      </label>
+      <label>מיקום לתצוגה
+        <input type="text" name="location" maxlength="120" placeholder="למשל פארק הירקון" value="${esc(location)}" />
+      </label>
+      <label>כתובת לניווט ב־Waze
+        <input type="text" name="nav_address" maxlength="200" placeholder="רחוב, עיר" value="${esc(nav)}" />
+      </label>
+      <label>מחיר המגרש (₪)
+        <input type="number" name="field_cost" min="1" max="999" step="1" value="${esc(String(cost))}" required />
+      </label>
+      <div class="admin-field-actions">
         <button type="submit" class="tiny-btn">שמירה</button>
+        ${reset}
       </div>
-      ${reset}
     </form>
   `;
 }
@@ -413,8 +472,12 @@ function renderGame(game) {
         <div>
           <h3>${esc(game.label_he)}</h3>
           <p class="meta">${esc(game.game_at_he)}</p>
+          ${game.location ? `<p class="meta location">${esc(game.location)}</p>` : ""}
         </div>
-        <span class="status ${statusClass}">${esc(game.status_he)}</span>
+        <div class="game-head-end">
+          ${wazeButton(game)}
+          <span class="status ${statusClass}">${esc(game.status_he)}</span>
+        </div>
       </div>
       <p class="muted">${esc(game.status_detail)}</p>
       <div class="list-head">
@@ -427,8 +490,8 @@ function renderGame(game) {
       ${renderJoin(game)}
       ${renderFieldFold(game)}
       ${renderTeamsFold(game)}
-      ${state.is_admin && !game.is_ended ? renderAdminDate(game) : ""}
-      ${state.is_admin ? `<div class="admin-tools"><button class="tiny-btn danger" data-clear="${game.slot}" type="button">ניקוי רשימה</button></div>` : ""}
+      ${renderAdminDate(game)}
+      ${state.is_admin && !game.is_ended ? `<div class="admin-tools"><button class="tiny-btn danger" data-clear="${game.slot}" type="button">ניקוי רשימה</button></div>` : ""}
     </article>
   `;
 }
@@ -704,7 +767,9 @@ function renderHome() {
         </label>
         <div>
           <h2>שלום ${esc(name)}</h2>
-          <p class="muted">ברוך הבא לטניסמייט. משחקים ביום ראשון ויום רביעי ב־20:00.</p>
+          <p class="muted">${nextUpcomingGame() && nextUpcomingGame().location
+            ? `המשחק הבא: ${esc(nextUpcomingGame().game_at_he)} · ${esc(nextUpcomingGame().location)}`
+            : "ברוך הבא לטניסמייט. משחקים ביום ראשון ויום רביעי ב־20:00."}</p>
         </div>
       </div>
       <ul class="welcome-stats">
@@ -795,8 +860,12 @@ function renderMatchDay() {
         <div>
           <h3>${esc(game.label_he)}</h3>
           <p class="meta">${esc(game.game_at_he)}</p>
+          ${game.location ? `<p class="meta location">${esc(game.location)}</p>` : ""}
         </div>
-        <span class="status ${game.is_ended ? "ended" : game.is_past ? "past" : "closed"}">${esc(game.status_he)}</span>
+        <div class="game-head-end">
+          ${wazeButton(game)}
+          <span class="status ${game.is_ended ? "ended" : game.is_past ? "past" : "closed"}">${esc(game.status_he)}</span>
+        </div>
       </div>
       <p id="matchDayCountdown" class="match-day-count">${esc(matchCountdownText(game))}</p>
       ${renderJoin(game)}
@@ -972,6 +1041,16 @@ async function onGameListClick(e) {
     payBtn.disabled = false;
     return;
   }
+  const fieldReset = e.target.closest("[data-field-reset]");
+  if (fieldReset) {
+    const data = await api("/api/admin/game-settings", {
+      slot: fieldReset.dataset.fieldReset,
+      week_key: fieldReset.dataset.weekKey || "",
+      reset: true,
+    });
+    applyState(data);
+    return;
+  }
   const dateReset = e.target.closest("[data-date-reset]");
   if (dateReset) {
     const data = await api("/api/admin/game-date", { slot: dateReset.dataset.dateReset, date: "" });
@@ -987,6 +1066,21 @@ async function onGameListClick(e) {
 }
 
 async function onBookerCustomSubmit(e) {
+  const settingsForm = e.target.closest("[data-game-settings]");
+  if (settingsForm) {
+    e.preventDefault();
+    const data = await api("/api/admin/game-settings", {
+      slot: settingsForm.dataset.gameSettings,
+      week_key: settingsForm.dataset.weekKey || "",
+      date: settingsForm.querySelector('[name="date"]')?.value || "",
+      time: settingsForm.querySelector('[name="time"]')?.value || "",
+      location: settingsForm.querySelector('[name="location"]')?.value || "",
+      nav_address: settingsForm.querySelector('[name="nav_address"]')?.value || "",
+      field_cost: settingsForm.querySelector('[name="field_cost"]')?.value || "",
+    });
+    applyState(data);
+    return;
+  }
   const dateForm = e.target.closest("[data-game-date]");
   if (dateForm) {
     e.preventDefault();
@@ -1151,7 +1245,7 @@ function scheduleLocalReminders(registration) {
     showLocalNote(
       registration,
       "המשחק בעוד שעה · טניסמייט",
-      "מתחילים ב־20:00. סמנו הגעה אם עוד לא.",
+      `מתחילים ב־${nextUpcomingGame() ? formatGameClock(nextUpcomingGame()) : "20:00"}. סמנו הגעה אם עוד לא.`,
       "tennismate-hour"
     );
   }, "_hour");
