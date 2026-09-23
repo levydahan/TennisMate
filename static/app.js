@@ -1533,8 +1533,10 @@ function pongEls() {
     overlay: document.getElementById("pongOverlay"),
     canvas: document.getElementById("pongCourt"),
     score: document.getElementById("pongScore"),
+    startHint: document.getElementById("pongStartHint"),
     end: document.getElementById("pongEnd"),
     winner: document.getElementById("pongWinner"),
+    trophy: document.getElementById("pongTrophy"),
     closeBtn: document.getElementById("pongClose"),
     againBtn: document.getElementById("pongAgain"),
   };
@@ -1644,22 +1646,46 @@ function newPongState(canvas) {
   return {
     w,
     h,
-    ball: { x: w / 2, y: h / 2, vx: 3.2 * (Math.random() < 0.5 ? 1 : -1), vy: 3.6 },
+    ball: { x: w / 2, y: h / 2, vx: 0, vy: 0 },
     player: { x: w / 2, y: h - 18, w: 72, h: 8 },
     ai: { x: w / 2, y: 14, w: 72, h: 8 },
     you: 0,
     pc: 0,
     over: false,
+    waiting: true,
+    serveTowardPlayer: true,
     keys: { left: false, right: false },
   };
 }
 
+function setPongHint(show) {
+  const { startHint } = pongEls();
+  if (startHint) startHint.hidden = !show;
+}
+
+function holdForServe(game, towardPlayer) {
+  game.waiting = true;
+  game.serveTowardPlayer = towardPlayer;
+  game.ball.x = game.w / 2;
+  game.ball.y = game.h / 2;
+  game.ball.vx = 0;
+  game.ball.vy = 0;
+  setPongHint(true);
+}
+
 function serveBall(game, towardPlayer) {
   const dir = Math.random() < 0.5 ? -1 : 1;
+  game.waiting = false;
   game.ball.x = game.w / 2;
   game.ball.y = game.h / 2;
   game.ball.vx = 3.1 * dir;
   game.ball.vy = towardPlayer ? 3.5 : -3.5;
+  setPongHint(false);
+}
+
+function startPongRally() {
+  if (!pong || pong.over || !pong.waiting) return;
+  serveBall(pong, pong.serveTowardPlayer);
 }
 
 function hitPaddle(ball, paddle) {
@@ -1701,13 +1727,18 @@ function updatePongScore() {
 function finishPong() {
   if (!pong) return;
   pong.over = true;
-  const { end, winner } = pongEls();
-  if (winner) winner.textContent = pong.you >= PONG_WIN ? "ניצחת" : "המחשב ניצח";
+  const won = pong.you >= PONG_WIN;
+  const { end, winner, trophy } = pongEls();
+  if (winner) winner.textContent = won ? "ניצחת" : "המחשב ניצח";
+  if (trophy) {
+    trophy.hidden = !won;
+    trophy.setAttribute("aria-hidden", won ? "false" : "true");
+  }
   if (end) end.hidden = false;
 }
 
 function stepPong() {
-  if (!pong || pong.over) return;
+  if (!pong || pong.over || pong.waiting) return;
   const speed = 6.4;
   if (pong.keys.left) pong.player.x -= speed;
   if (pong.keys.right) pong.player.x += speed;
@@ -1735,12 +1766,12 @@ function stepPong() {
     pong.pc += 1;
     updatePongScore();
     if (pong.pc >= PONG_WIN) finishPong();
-    else serveBall(pong, false);
+    else holdForServe(pong, false);
   } else if (pong.ball.y < 0) {
     pong.you += 1;
     updatePongScore();
     if (pong.you >= PONG_WIN) finishPong();
-    else serveBall(pong, true);
+    else holdForServe(pong, true);
   }
 }
 
@@ -1770,6 +1801,12 @@ function closePong() {
   }
   pong = null;
   if (end) end.hidden = true;
+  const { trophy } = pongEls();
+  if (trophy) {
+    trophy.hidden = true;
+    trophy.setAttribute("aria-hidden", "true");
+  }
+  setPongHint(true);
   if (overlay) overlay.hidden = true;
 }
 
@@ -1782,6 +1819,7 @@ function startPongMatch() {
   pong.theme = startRockyTheme();
   if (end) end.hidden = true;
   overlay.hidden = false;
+  setPongHint(true);
   updatePongScore();
   loopPong();
 }
@@ -1822,6 +1860,7 @@ function initPongEgg() {
   if (canvas) {
     let dragging = false;
     canvas.addEventListener("pointerdown", (e) => {
+      startPongRally();
       dragging = true;
       canvas.setPointerCapture(e.pointerId);
       movePongFromPointer(e);

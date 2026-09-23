@@ -1514,3 +1514,10 @@ dialog:not([open]) {
   font-size: 1.2rem;
   font-weight: 800;
 }
+
+.pong-trophy {
+  font-size: 4.2rem;
+  line-height: 1;
+  margin: 4px 0 8px;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+}
