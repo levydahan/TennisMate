@@ -1621,17 +1621,35 @@ def admin_game_settings():
     return jsonify(payload)
 
 
-@app.post("/api/booker")
-def api_booker():
-    if not current_user() and not session.get("is_admin"):
-        return jsonify({"ok": False, "message": "יש להתחבר כדי לבחור מזמין"}), 401
-    data = request.get_json(silent=True) or {}
+def resolve_booker_week(data: dict) -> tuple[str, str, bool] | tuple[None, str, int]:
     slot = (data.get("slot") or "").strip()
     if slot not in ("sunday", "wednesday"):
-        return jsonify({"ok": False, "message": "משחק לא תקין"}), 400
+        return None, "משחק לא תקין", 400
+    current = sync_slot(slot)
+    raw_week = " ".join(str(data.get("week_key") or "").split())
+    if not raw_week or raw_week == current["week_key"]:
+        return slot, current["week_key"], bool(current.get("is_ended"))
+    try:
+        date.fromisoformat(raw_week)
+    except ValueError:
+        return None, "שבוע לא תקין", 400
+    return slot, raw_week, True
 
-    state = sync_slot(slot)
-    settings = get_settings(slot, state["week_key"])
+
+@app.post("/api/booker")
+def api_booker():
+    is_admin = bool(session.get("is_admin"))
+    if not current_user() and not is_admin:
+        return jsonify({"ok": False, "message": "יש להתחבר כדי לבחור מזמין"}), 401
+    data = request.get_json(silent=True) or {}
+    resolved = resolve_booker_week(data)
+    if resolved[0] is None:
+        return jsonify({"ok": False, "message": resolved[1]}), resolved[2]
+    slot, week_key, is_ended = resolved
+    if is_ended and not is_admin:
+        return jsonify({"ok": False, "message": "אפשר לבחור מזמין רק למשחק שעוד לא הסתיים"}), 403
+
+    settings = get_settings(slot, week_key)
     raw_user = data.get("user_id")
     if raw_user not in (None, "", False):
         try:
@@ -1643,12 +1661,12 @@ def api_booker():
             return jsonify({"ok": False, "message": "המשתמש לא נמצא"}), 404
         display = canonical_player(user.name) or user.name
         row = Enrollment.query.filter_by(
-            slot=slot, week_key=state["week_key"], user_id=user.id, is_waitlist=False
+            slot=slot, week_key=week_key, user_id=user.id, is_waitlist=False
         ).first()
         if not row:
             _, name_key = normalize_name(user.name)
             row = Enrollment.query.filter_by(
-                slot=slot, week_key=state["week_key"], name_key=name_key, is_waitlist=False
+                slot=slot, week_key=week_key, name_key=name_key, is_waitlist=False
             ).first()
         settings.booker_id = row.id if row else None
         settings.booker_custom = None if row else display
@@ -1674,7 +1692,7 @@ def api_booker():
         if (
             not row
             or row.slot != slot
-            or row.week_key != state["week_key"]
+            or row.week_key != week_key
             or row.is_waitlist
         ):
             return jsonify({"ok": False, "message": "יש לבחור שחקן שנרשם למשחק"}), 400
@@ -1688,7 +1706,7 @@ def api_booker():
     if custom:
         display = canonical_player(custom) or custom
         roster = Enrollment.query.filter_by(
-            slot=slot, week_key=state["week_key"], is_waitlist=False
+            slot=slot, week_key=week_key, is_waitlist=False
         ).all()
         match = next(
             (row for row in roster if (canonical_player(row.name) or row.name) == display),

@@ -244,8 +244,12 @@ function bookerUsers() {
   return state.users || [];
 }
 
+function bookerKey(game) {
+  return `${game.slot}:${game.week_key || ""}`;
+}
+
 function bookerSelectValue(game) {
-  if (bookerCustomOpen[game.slot]) return "custom";
+  if (bookerCustomOpen[bookerKey(game)]) return "custom";
   const users = bookerUsers();
   if (game.booker_id) {
     const player = (game.roster || []).find((p) => p.id === game.booker_id);
@@ -260,21 +264,21 @@ function bookerSelectValue(game) {
 }
 
 function renderBookerPicker(game) {
-  if (game.is_ended) return "";
+  if (game.is_ended && !state.is_admin) return "";
   if (!state.user && !state.is_admin) return "";
   const selected = bookerSelectValue(game);
   const showCustom = selected === "custom";
   const custom = showCustom && !game.booker_id ? (game.booker_name || "") : "";
   return `
     <label class="booker-label">מי יזמין את המגרש</label>
-    <select data-booker="${game.slot}">
+    <select data-booker="${esc(game.slot)}" data-week-key="${esc(game.week_key || "")}">
       <option value="">בחרו מי יזמין את המגרש</option>
       ${bookerUsers().map((user) => `
         <option value="user:${user.id}" ${selected === `user:${user.id}` ? "selected" : ""}>${esc(user.name)}</option>
       `).join("")}
       <option value="custom" ${showCustom ? "selected" : ""}>שם אחר</option>
     </select>
-    <form class="booker-custom" data-booker-custom="${game.slot}" ${showCustom ? "" : "hidden"}>
+    <form class="booker-custom" data-booker-custom="${esc(game.slot)}" data-week-key="${esc(game.week_key || "")}" ${showCustom ? "" : "hidden"}>
       <input type="text" maxlength="80" placeholder="שם המזמין" value="${esc(custom)}" autocomplete="name" />
       <button type="submit" class="tiny-btn">שמירה</button>
     </form>
@@ -1096,12 +1100,14 @@ async function onBookerCustomSubmit(e) {
   if (!form) return;
   e.preventDefault();
   const input = form.querySelector("input");
-  bookerCustomOpen[form.dataset.bookerCustom] = true;
+  const key = `${form.dataset.bookerCustom}:${form.dataset.weekKey || ""}`;
+  bookerCustomOpen[key] = true;
   const data = await api("/api/booker", {
     slot: form.dataset.bookerCustom,
+    week_key: form.dataset.weekKey || "",
     name: (input && input.value) || "",
   });
-  if (data.ok) bookerCustomOpen[form.dataset.bookerCustom] = false;
+  if (data.ok) bookerCustomOpen[key] = false;
   applyState(data);
 }
 
@@ -1109,15 +1115,17 @@ async function onGameListChange(e) {
   const select = e.target.closest("[data-booker]");
   if (select) {
     const slot = select.dataset.booker;
+    const weekKey = select.dataset.weekKey || "";
+    const key = `${slot}:${weekKey}`;
     if (select.value === "custom") {
-      bookerCustomOpen[slot] = true;
+      bookerCustomOpen[key] = true;
       render();
-      const input = document.querySelector(`[data-booker-custom="${slot}"] input`);
+      const input = document.querySelector(`[data-booker-custom="${slot}"][data-week-key="${weekKey}"] input`);
       if (input) input.focus();
       return;
     }
-    bookerCustomOpen[slot] = false;
-    const payload = { slot };
+    bookerCustomOpen[key] = false;
+    const payload = { slot, week_key: weekKey };
     if (select.value.startsWith("user:")) {
       payload.user_id = Number(select.value.slice(5));
     }
