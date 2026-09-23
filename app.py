@@ -33,11 +33,14 @@ from schedule import (
     banner_target,
     draw_teams,
     draw_rematch,
+    end_dt_for,
     format_dt_he,
     get_slot_state,
     is_match_day,
+    kickoff_bundle,
     next_game_at,
     now_il,
+    parse_game_time,
     todays_match_game_at,
 )
 
@@ -139,6 +142,10 @@ class GameSettings(db.Model):
     booker_id = db.Column(db.Integer, nullable=True)
     booker_custom = db.Column(db.String(80), nullable=True)
     game_date = db.Column(db.String(16), nullable=True)
+    game_time = db.Column(db.String(8), nullable=True)
+    location = db.Column(db.String(120), nullable=True)
+    nav_address = db.Column(db.String(200), nullable=True)
+    field_cost = db.Column(db.Integer, nullable=True)
     teams_json = db.Column(db.Text, nullable=True)
     teams_ids = db.Column(db.String(200), nullable=True)
     teams2_json = db.Column(db.Text, nullable=True)
@@ -227,6 +234,14 @@ def _ensure_schema():
                 conn.execute(text("ALTER TABLE game_settings ADD COLUMN booker_custom VARCHAR(80)"))
             if "game_date" not in columns:
                 conn.execute(text("ALTER TABLE game_settings ADD COLUMN game_date VARCHAR(16)"))
+            if "game_time" not in columns:
+                conn.execute(text("ALTER TABLE game_settings ADD COLUMN game_time VARCHAR(8)"))
+            if "location" not in columns:
+                conn.execute(text("ALTER TABLE game_settings ADD COLUMN location VARCHAR(120)"))
+            if "nav_address" not in columns:
+                conn.execute(text("ALTER TABLE game_settings ADD COLUMN nav_address VARCHAR(200)"))
+            if "field_cost" not in columns:
+                conn.execute(text("ALTER TABLE game_settings ADD COLUMN field_cost INTEGER"))
     if "users" in inspector.get_table_names():
         columns = {col["name"] for col in inspector.get_columns("users")}
         if "avatar" not in columns:
@@ -351,14 +366,23 @@ def unpaid_debt(user: User | None, now: datetime | None = None) -> dict | None:
             game_date = date.fromisoformat(row.week_key)
         except ValueError:
             continue
-        start_dt = datetime.combine(game_date, GAME_TIME, tzinfo=TZ)
-        end_dt = datetime.combine(game_date, GAME_END_TIME, tzinfo=TZ)
+        settings = GameSettings.query.filter_by(slot=row.slot, week_key=row.week_key).first()
+        raw = (getattr(settings, "game_date", None) or "").strip()
+        if raw:
+            try:
+                game_date = date.fromisoformat(raw)
+            except ValueError:
+                pass
+        kickoff = parse_game_time(getattr(settings, "game_time", None)) or GAME_TIME
+        clocks = kickoff_bundle(game_date, kickoff)
+        start_dt = clocks["game_dt"]
+        end_dt = clocks["game_end_dt"]
         if now < end_dt:
             continue
         if now < start_dt:
             continue
         n = Enrollment.query.filter_by(slot=row.slot, week_key=row.week_key, is_waitlist=False).count()
-        share = round(FIELD_COST_NIS / n, 2) if n else None
+        share = round(game_field_cost(settings) / n, 2) if n else None
         debts.append({
             "enrollment_id": row.id,
             "slot": row.slot,
@@ -379,41 +403,78 @@ def owns_enrollment(row: Enrollment, user: User) -> bool:
     return row.name_key == normalize_name(user.name)[1]
 
 
-def load_date_overrides() -> dict:
-    cached = getattr(g, "date_overrides", None)
+def game_field_cost(settings: GameSettings | None) -> int:
+    if settings is not None and settings.field_cost is not None:
+        return int(settings.field_cost)
+    return FIELD_COST_NIS
+
+
+def game_location(settings: GameSettings | None) -> str | None:
+    loc = (getattr(settings, "location", None) or "").strip()
+    return loc or None
+
+
+def game_nav_address(settings: GameSettings | None) -> str | None:
+    addr = (getattr(settings, "nav_address", None) or "").strip()
+    return addr or None
+
+
+def load_game_overrides() -> dict:
+    cached = getattr(g, "game_overrides", None)
     if cached is not None:
         return cached
-    mapping = {}
+    mapping = {"dates": {}, "times": {}}
     try:
-        rows = GameSettings.query.filter(GameSettings.game_date.isnot(None)).all()
+        rows = GameSettings.query.all()
     except Exception:
-        g.date_overrides = {}
-        return g.date_overrides
+        g.game_overrides = mapping
+        return mapping
     for row in rows:
+        key = (row.slot, row.week_key)
         raw = (row.game_date or "").strip()
-        if not raw:
-            continue
-        try:
-            mapping[(row.slot, row.week_key)] = date.fromisoformat(raw)
-        except ValueError:
-            continue
-    g.date_overrides = mapping
+        if raw:
+            try:
+                mapping["dates"][key] = date.fromisoformat(raw)
+            except ValueError:
+                pass
+        kickoff = parse_game_time(row.game_time)
+        if kickoff:
+            mapping["times"][key] = kickoff
+    g.game_overrides = mapping
     return mapping
 
 
+def load_date_overrides() -> dict:
+    return load_game_overrides()["dates"]
+
+
+def load_time_overrides() -> dict:
+    return load_game_overrides()["times"]
+
+
 def clear_date_overrides_cache():
-    if hasattr(g, "date_overrides"):
-        delattr(g, "date_overrides")
+    for attr in ("date_overrides", "game_overrides"):
+        if hasattr(g, attr):
+            delattr(g, attr)
 
 
 def sync_slot(slot: str, now: datetime | None = None) -> dict:
     """Return the current game cycle. Past enrollments are kept forever."""
-    return get_slot_state(slot, now, load_date_overrides())
+    return get_slot_state(slot, now, load_date_overrides(), load_time_overrides())
 
 
-def week_label(week_key: str) -> str:
-    day = date.fromisoformat(week_key)
-    return format_dt_he(datetime.combine(day, GAME_TIME, tzinfo=TZ))
+def week_label(week_key: str, settings: GameSettings | None = None) -> str:
+    play_day = date.fromisoformat(week_key)
+    kickoff = GAME_TIME
+    if settings:
+        raw = (settings.game_date or "").strip()
+        if raw:
+            try:
+                play_day = date.fromisoformat(raw)
+            except ValueError:
+                pass
+        kickoff = parse_game_time(settings.game_time) or GAME_TIME
+    return format_dt_he(datetime.combine(play_day, kickoff, tzinfo=TZ))
 
 
 def get_settings(slot: str, week_key: str) -> GameSettings:
@@ -501,7 +562,8 @@ def players_payload(
         settings.booker_id = None
         db.session.commit()
     n = len(roster)
-    share = round(FIELD_COST_NIS / n, 2) if n else None
+    cost = game_field_cost(settings)
+    share = round(cost / n, 2) if n else None
     booker_id, booker_name = resolve_booker(settings, roster)
     teams, teams2 = ensure_teams(slot, week_key, roster, teams_ready, rematch_ready)
     return {
@@ -511,7 +573,9 @@ def players_payload(
         "count": n,
         "spots_left": max(MAX_PLAYERS - n, 0),
         "share": share,
-        "field_cost": FIELD_COST_NIS,
+        "field_cost": cost,
+        "location": game_location(settings),
+        "nav_address": game_nav_address(settings),
         "booker_id": booker_id,
         "booker_name": booker_name,
         "teams": teams,
@@ -654,13 +718,22 @@ def my_stats(me: User | None) -> dict | None:
         for week_key in week_keys:
             if week_key == current["week_key"] and not current["is_past"]:
                 continue
-            game_dt = datetime.combine(date.fromisoformat(week_key), GAME_TIME, tzinfo=TZ)
+            settings = GameSettings.query.filter_by(slot=slot, week_key=week_key).first()
+            play_day = date.fromisoformat(week_key)
+            raw = (getattr(settings, "game_date", None) or "").strip()
+            if raw:
+                try:
+                    play_day = date.fromisoformat(raw)
+                except ValueError:
+                    pass
+            kickoff = parse_game_time(getattr(settings, "game_time", None)) or GAME_TIME
+            game_dt = datetime.combine(play_day, kickoff, tzinfo=TZ)
             if created and game_dt < created.astimezone(TZ):
                 continue
             rows = Enrollment.query.filter_by(slot=slot, week_key=week_key, is_waitlist=False).all()
             if not rows:
                 continue
-            share = FIELD_COST_NIS / len(rows)
+            share = game_field_cost(settings) / len(rows)
             mine = next(
                 (
                     row
@@ -670,7 +743,6 @@ def my_stats(me: User | None) -> dict | None:
                 ),
                 None,
             )
-            settings = GameSettings.query.filter_by(slot=slot, week_key=week_key).first()
             roster = [{"id": row.id, "name": canonical_player(row.name) or row.name} for row in rows]
             booker_id, booker_name = resolve_booker(settings, roster)
             is_booker = bool(mine and (booker_id == mine.id or booker_name == my_name))
@@ -726,13 +798,17 @@ def history_for_slot(slot: str, current_week_key: str, exclude: str | None = Non
                 teams2 = json.loads(settings.teams2_json)
         _booker_id, booker_name = resolve_booker(settings, roster)
         n = len(roster)
+        cost = game_field_cost(settings)
         history.append({
             "week_key": week_key,
-            "game_at_he": week_label(week_key),
+            "game_at_he": week_label(week_key, settings),
             "roster": roster,
             "waiting": waiting,
             "count": n,
-            "share": round(FIELD_COST_NIS / n, 2) if n else None,
+            "share": round(cost / n, 2) if n else None,
+            "field_cost": cost,
+            "location": game_location(settings),
+            "nav_address": game_nav_address(settings),
             "booker_name": booker_name,
             "teams": teams,
             "teams2": teams2,
@@ -776,8 +852,10 @@ def ended_game_payload(slot: str, week_key: str, me: User | None = None) -> dict
             play_day = date.fromisoformat(raw)
         except ValueError:
             play_day = date.fromisoformat(week_key)
-    game_dt = datetime.combine(play_day, GAME_TIME, tzinfo=TZ)
-    game_end_dt = datetime.combine(play_day, GAME_END_TIME, tzinfo=TZ)
+    kickoff = parse_game_time(getattr(settings, "game_time", None)) or GAME_TIME
+    clocks = kickoff_bundle(play_day, kickoff)
+    game_dt = clocks["game_dt"]
+    game_end_dt = clocks["game_end_dt"]
     players = players_payload(slot, week_key, True, True, me)
     return {
         "slot": slot,
@@ -785,6 +863,8 @@ def ended_game_payload(slot: str, week_key: str, me: User | None = None) -> dict
         "week_key": week_key,
         "game_date": play_day.isoformat(),
         "date_override": play_day.isoformat() != week_key,
+        "game_time": kickoff.strftime("%H:%M"),
+        "time_override": kickoff != GAME_TIME,
         "prev_week_key": None,
         "game_at": game_dt.isoformat(),
         "game_end_at": game_end_dt.isoformat(),
@@ -804,7 +884,6 @@ def ended_game_payload(slot: str, week_key: str, me: User | None = None) -> dict
         "status_he": "המשחק הסתיים",
         "status_detail": "הרשימה נשמרת",
         "max_players": MAX_PLAYERS,
-        "field_cost": FIELD_COST_NIS,
         **players,
         "history": [],
     }
@@ -928,7 +1007,9 @@ def run_pay_reminders(force: bool = False) -> dict:
             skipped.append({"slot": slot, "reason": "already_sent"})
             continue
         names = [canonical_player(p["name"]) or p["name"] for p in roster]
-        message = build_pay_message(state["label_he"], players["share"], names)
+        message = build_pay_message(
+            state["label_he"], players["share"], names, players.get("field_cost")
+        )
         pushed = dispatch_web_push(message)
         if not already:
             db.session.add(PayReminderLog(slot=slot, week_key=state["week_key"]))
@@ -945,12 +1026,13 @@ def run_pay_reminders(force: bool = False) -> dict:
 def run_hour_before_reminders(force: bool = False) -> dict:
     now = now_il()
     overrides = load_date_overrides()
-    if not hour_before_is_due(now, force=force, date_overrides=overrides):
+    times = load_time_overrides()
+    if not hour_before_is_due(now, force=force, date_overrides=overrides, time_overrides=times):
         return {"ok": True, "sent": [], "skipped": [{"reason": "not_due"}]}
     slot = None
     state = None
     for key in ("sunday", "wednesday"):
-        candidate = get_slot_state(key, now, overrides)
+        candidate = get_slot_state(key, now, overrides, times)
         game_day = datetime.fromisoformat(candidate["game_at"]).astimezone(TZ).date()
         if game_day == now.date() and not candidate["is_ended"]:
             slot = key
@@ -958,13 +1040,14 @@ def run_hour_before_reminders(force: bool = False) -> dict:
             break
     if not slot and force:
         slot = "sunday"
-        state = get_slot_state(slot, now, overrides)
+        state = get_slot_state(slot, now, overrides, times)
     if not slot:
         return {"ok": True, "sent": [], "skipped": [{"reason": "not_match_day"}]}
     already = HourBeforeLog.query.filter_by(slot=slot, week_key=state["week_key"]).first()
     if already and not force:
         return {"ok": True, "sent": [], "skipped": [{"slot": slot, "reason": "already_sent"}]}
-    message = build_hour_before_message(state["label_he"])
+    time_he = datetime.fromisoformat(state["game_at"]).astimezone(TZ).strftime("%H:%M")
+    message = build_hour_before_message(state["label_he"], time_he)
     pushed = dispatch_web_push(message)
     if not already:
         db.session.add(HourBeforeLog(slot=slot, week_key=state["week_key"]))
@@ -1002,11 +1085,12 @@ def public_state() -> dict:
         if (debt["slot"], debt["week_key"]) not in have:
             ended_games.append(ended_game_payload(debt["slot"], debt["week_key"], me))
             ended_games.sort(key=lambda game: game["game_at"], reverse=True)
-    nxt = next_pay_reminder_at(date_overrides=overrides)
-    hour_before = next_hour_before_at(date_overrides=overrides)
-    match_at = todays_match_game_at(date_overrides=overrides)
-    upcoming = next_game_at(date_overrides=overrides)
-    target = banner_target(date_overrides=overrides)
+    times = load_time_overrides()
+    nxt = next_pay_reminder_at(date_overrides=overrides, time_overrides=times)
+    hour_before = next_hour_before_at(date_overrides=overrides, time_overrides=times)
+    match_at = todays_match_game_at(date_overrides=overrides, time_overrides=times)
+    upcoming = next_game_at(date_overrides=overrides, time_overrides=times)
+    target = banner_target(date_overrides=overrides, time_overrides=times)
     warning = pay_warning_text(debt)
     return {
         "now": now_il().isoformat(),
@@ -1027,8 +1111,8 @@ def public_state() -> dict:
         "pay_reminder_at_he": format_dt_he(nxt),
         "hour_before_at": hour_before.isoformat(),
         "hour_before_at_he": format_dt_he(hour_before),
-        "is_match_day": is_match_day(date_overrides=overrides),
-        "banner_flash": banner_should_flash(date_overrides=overrides),
+        "is_match_day": is_match_day(date_overrides=overrides, time_overrides=times),
+        "banner_flash": banner_should_flash(date_overrides=overrides, time_overrides=times),
         "banner_mode": target["mode"],
         "banner_at": target["at"],
         "banner_at_he": target["at_he"],
@@ -1379,43 +1463,161 @@ def admin_paid():
     return jsonify(payload)
 
 
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def resolve_admin_game(data: dict) -> tuple[str, str, bool] | tuple[None, str, int]:
+    slot = (data.get("slot") or "").strip()
+    if slot not in ("sunday", "wednesday"):
+        return None, "משחק לא תקין", 400
+    current = sync_slot(slot)
+    raw_week = " ".join(str(data.get("week_key") or "").split())
+    if not raw_week or raw_week == current["week_key"]:
+        return slot, current["week_key"], True
+    try:
+        date.fromisoformat(raw_week)
+    except ValueError:
+        return None, "שבוע לא תקין", 400
+    return slot, raw_week, False
+
+
+def parse_admin_cost(raw) -> int | None | bool:
+    if raw in (None, ""):
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return False
+    if value < 1 or value > 999:
+        return False
+    return value
+
+
+def apply_game_settings(settings: GameSettings, slot: str, week_key: str, data: dict, is_current: bool):
+    scheduled = date.fromisoformat(week_key)
+    chosen = date.fromisoformat(settings.game_date) if settings.game_date else scheduled
+    kickoff = parse_game_time(settings.game_time) or GAME_TIME
+
+    if "date" in data:
+        raw = " ".join(str(data.get("date") or "").split())
+        if not raw or raw == week_key:
+            settings.game_date = None
+            chosen = scheduled
+        else:
+            try:
+                chosen = date.fromisoformat(raw)
+            except ValueError:
+                return "תאריך לא תקין", 400
+            if abs((chosen - scheduled).days) > 21:
+                return "אפשר להזיז את המשחק עד 21 יום", 400
+            if is_current:
+                other = "wednesday" if slot == "sunday" else "sunday"
+                other_day = date.fromisoformat(sync_slot(other)["game_date"])
+                if chosen == other_day:
+                    return "התאריך תפוס על ידי המשחק השני", 400
+            settings.game_date = chosen.isoformat()
+
+    if "time" in data:
+        raw_time = " ".join(str(data.get("time") or "").split())
+        if not raw_time or raw_time[:5] == "20:00":
+            settings.game_time = None
+            kickoff = GAME_TIME
+        else:
+            stamp = raw_time[:5]
+            if not TIME_RE.match(stamp):
+                return "שעה לא תקינה", 400
+            settings.game_time = stamp
+            kickoff = datetime.strptime(stamp, "%H:%M").time()
+
+    if is_current and now_il() >= end_dt_for(chosen, kickoff):
+        return "אי אפשר לבחור מועד שכבר הסתיים", 400
+
+    if "location" in data:
+        loc = " ".join(str(data.get("location") or "").split())
+        settings.location = loc[:120].strip() or None
+
+    if "nav_address" in data:
+        addr = " ".join(str(data.get("nav_address") or "").split())
+        settings.nav_address = addr[:200].strip() or None
+
+    if "field_cost" in data:
+        cost = parse_admin_cost(data.get("field_cost"))
+        if cost is False:
+            return "מחיר לא תקין", 400
+        settings.field_cost = None if cost in (None, FIELD_COST_NIS) else cost
+
+    return None, None
+
+
+def settings_message(settings: GameSettings, week_key: str) -> str:
+    play_day = date.fromisoformat(settings.game_date) if settings.game_date else date.fromisoformat(week_key)
+    kickoff = parse_game_time(settings.game_time) or GAME_TIME
+    when = format_dt_he(datetime.combine(play_day, kickoff, tzinfo=TZ))
+    bits = [when]
+    if settings.location:
+        bits.append(settings.location)
+    if settings.field_cost:
+        bits.append(f"{settings.field_cost} ₪")
+    return "המגרש עודכן · " + " · ".join(bits)
+
+
 @app.post("/api/admin/game-date")
 @admin_required
 def admin_game_date():
     data = request.get_json(silent=True) or {}
-    slot = (data.get("slot") or "").strip()
-    if slot not in ("sunday", "wednesday"):
-        return jsonify({"ok": False, "message": "משחק לא תקין"}), 400
-    state = sync_slot(slot)
-    if state["is_ended"]:
-        return jsonify({"ok": False, "message": "אי אפשר לשנות משחק שהסתיים"}), 400
-    settings = get_settings(slot, state["week_key"])
-    raw = " ".join(str(data.get("date") or "").split())
-    if not raw or raw == state["week_key"]:
-        settings.game_date = None
-        db.session.commit()
-        clear_date_overrides_cache()
-        payload = public_state()
-        payload.update({"ok": True, "message": "תאריך המשחק חזר לברירת המחדל"})
-        return jsonify(payload)
-    try:
-        chosen = date.fromisoformat(raw)
-    except ValueError:
-        return jsonify({"ok": False, "message": "תאריך לא תקין"}), 400
-    if now_il() >= datetime.combine(chosen, GAME_END_TIME, tzinfo=TZ):
-        return jsonify({"ok": False, "message": "אי אפשר לבחור תאריך שכבר הסתיים"}), 400
-    scheduled = date.fromisoformat(state["week_key"])
-    if abs((chosen - scheduled).days) > 21:
-        return jsonify({"ok": False, "message": "אפשר להזיז את המשחק עד 21 יום"}), 400
-    other = "wednesday" if slot == "sunday" else "sunday"
-    other_day = date.fromisoformat(sync_slot(other)["game_date"])
-    if chosen == other_day:
-        return jsonify({"ok": False, "message": "התאריך תפוס על ידי המשחק השני"}), 400
-    settings.game_date = chosen.isoformat()
+    resolved = resolve_admin_game(data)
+    if resolved[0] is None:
+        return jsonify({"ok": False, "message": resolved[1]}), resolved[2]
+    slot, week_key, is_current = resolved
+    settings = get_settings(slot, week_key)
+    error, status = apply_game_settings(settings, slot, week_key, {"date": data.get("date")}, is_current)
+    if error:
+        db.session.rollback()
+        return jsonify({"ok": False, "message": error}), status
     db.session.commit()
     clear_date_overrides_cache()
     payload = public_state()
-    payload.update({"ok": True, "message": f"המשחק עבר ל־{format_dt_he(datetime.combine(chosen, GAME_TIME, tzinfo=TZ))}"})
+    if settings.game_date:
+        play_day = date.fromisoformat(settings.game_date)
+        kickoff = parse_game_time(settings.game_time) or GAME_TIME
+        payload.update({"ok": True, "message": f"המשחק עבר ל־{format_dt_he(datetime.combine(play_day, kickoff, tzinfo=TZ))}"})
+    else:
+        payload.update({"ok": True, "message": "תאריך המשחק חזר לברירת המחדל"})
+    return jsonify(payload)
+
+
+@app.post("/api/admin/game-settings")
+@admin_required
+def admin_game_settings():
+    data = request.get_json(silent=True) or {}
+    resolved = resolve_admin_game(data)
+    if resolved[0] is None:
+        return jsonify({"ok": False, "message": resolved[1]}), resolved[2]
+    slot, week_key, is_current = resolved
+    settings = get_settings(slot, week_key)
+    reset = bool(data.get("reset"))
+    payload_fields = (
+        {"date": "", "time": "", "location": "", "nav_address": "", "field_cost": ""}
+        if reset
+        else data
+    )
+    error, status = apply_game_settings(settings, slot, week_key, payload_fields, is_current)
+    if error:
+        db.session.rollback()
+        return jsonify({"ok": False, "message": error}), status
+    db.session.commit()
+    clear_date_overrides_cache()
+    payload = public_state()
+    if reset or (
+        not settings.game_date
+        and not settings.game_time
+        and not settings.location
+        and not settings.nav_address
+        and settings.field_cost is None
+    ):
+        payload.update({"ok": True, "message": "פרטי המגרש חזרו לברירת המחדל"})
+    else:
+        payload.update({"ok": True, "message": settings_message(settings, week_key)})
     return jsonify(payload)
 
 

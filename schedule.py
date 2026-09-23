@@ -54,7 +54,51 @@ def now_il() -> datetime:
 MATCH_WEEKDAYS = {spec["weekday"] for spec in SLOTS.values()}
 
 
-def is_match_day(now: datetime | None = None, date_overrides: dict | None = None) -> bool:
+def parse_game_time(raw: str | None) -> time | None:
+    """Parse HH:MM. Returns None if empty or invalid."""
+    value = (raw or "").strip()
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value[:5], "%H:%M").time()
+    except ValueError:
+        return None
+
+
+def end_dt_for(play_date: date, kickoff: time | None = None) -> datetime:
+    """Game-end instant for a play date. Custom kickoff lasts 2h01m."""
+    kickoff = kickoff or GAME_TIME
+    if kickoff == GAME_TIME:
+        return datetime.combine(play_date, GAME_END_TIME, tzinfo=TZ)
+    return datetime.combine(play_date, kickoff, tzinfo=TZ) + timedelta(hours=2, minutes=1)
+
+
+def kickoff_bundle(play_date: date, kickoff: time | None = None) -> dict:
+    """Kickoff and derived clocks (draw, rematch, enroll close, end)."""
+    kickoff = kickoff or GAME_TIME
+    game_dt = datetime.combine(play_date, kickoff, tzinfo=TZ)
+    if kickoff == GAME_TIME:
+        return {
+            "game_dt": game_dt,
+            "game_end_dt": datetime.combine(play_date, GAME_END_TIME, tzinfo=TZ),
+            "enroll_close_dt": datetime.combine(play_date, ENROLL_CLOSE_TIME, tzinfo=TZ),
+            "draw_dt": datetime.combine(play_date, DRAW_TIME, tzinfo=TZ),
+            "rematch_dt": datetime.combine(play_date, REMATCH_TIME, tzinfo=TZ),
+        }
+    return {
+        "game_dt": game_dt,
+        "game_end_dt": game_dt + timedelta(hours=2, minutes=1),
+        "enroll_close_dt": game_dt + timedelta(hours=2),
+        "draw_dt": game_dt - timedelta(minutes=1),
+        "rematch_dt": game_dt + timedelta(hours=1),
+    }
+
+
+def is_match_day(
+    now: datetime | None = None,
+    date_overrides: dict | None = None,
+    time_overrides: dict | None = None,
+) -> bool:
     """True on a day that currently has a Sunday or Wednesday game, including reschedules."""
     now = now_il() if now is None else now
     if now.tzinfo is None:
@@ -62,28 +106,36 @@ def is_match_day(now: datetime | None = None, date_overrides: dict | None = None
     else:
         now = now.astimezone(TZ)
     for slot_key in SLOTS:
-        state = get_slot_state(slot_key, now, date_overrides)
+        state = get_slot_state(slot_key, now, date_overrides, time_overrides)
         game_day = datetime.fromisoformat(state["game_at"]).astimezone(TZ).date()
         if now.date() == game_day and not state["is_ended"]:
             return True
     return False
 
 
-def todays_match_game_at(now: datetime | None = None, date_overrides: dict | None = None) -> datetime | None:
+def todays_match_game_at(
+    now: datetime | None = None,
+    date_overrides: dict | None = None,
+    time_overrides: dict | None = None,
+) -> datetime | None:
     now = now_il() if now is None else now
     if now.tzinfo is None:
         now = now.replace(tzinfo=TZ)
     else:
         now = now.astimezone(TZ)
     for slot_key in SLOTS:
-        state = get_slot_state(slot_key, now, date_overrides)
+        state = get_slot_state(slot_key, now, date_overrides, time_overrides)
         game_dt = datetime.fromisoformat(state["game_at"])
         if game_dt.astimezone(TZ).date() == now.date() and not state["is_ended"]:
             return game_dt
     return None
 
 
-def next_game_at(now: datetime | None = None, date_overrides: dict | None = None) -> datetime:
+def next_game_at(
+    now: datetime | None = None,
+    date_overrides: dict | None = None,
+    time_overrides: dict | None = None,
+) -> datetime:
     """Soonest game kickoff that has not started yet."""
     now = now_il() if now is None else now
     if now.tzinfo is None:
@@ -92,7 +144,7 @@ def next_game_at(now: datetime | None = None, date_overrides: dict | None = None
         now = now.astimezone(TZ)
     candidates = []
     for slot_key in SLOTS:
-        state = get_slot_state(slot_key, now, date_overrides)
+        state = get_slot_state(slot_key, now, date_overrides, time_overrides)
         game_dt = datetime.fromisoformat(state["game_at"])
         if now < game_dt:
             candidates.append(game_dt)
@@ -102,22 +154,32 @@ def next_game_at(now: datetime | None = None, date_overrides: dict | None = None
     return min(candidates)
 
 
-def banner_should_flash(now: datetime | None = None, date_overrides: dict | None = None) -> bool:
-    """Flash only on match day until the game ends at 22:01."""
+def banner_should_flash(
+    now: datetime | None = None,
+    date_overrides: dict | None = None,
+    time_overrides: dict | None = None,
+) -> bool:
+    """Flash only on match day until that game's end clock."""
     now = now_il() if now is None else now
     if now.tzinfo is None:
         now = now.replace(tzinfo=TZ)
     else:
         now = now.astimezone(TZ)
-    if not is_match_day(now, date_overrides):
+    if not is_match_day(now, date_overrides, time_overrides):
         return False
-    game_at = todays_match_game_at(now, date_overrides)
+    game_at = todays_match_game_at(now, date_overrides, time_overrides)
     if not game_at:
         return False
-    return now < datetime.combine(game_at.astimezone(TZ).date(), GAME_END_TIME, tzinfo=TZ)
+    local = game_at.astimezone(TZ)
+    kickoff = local.time().replace(second=0, microsecond=0)
+    return now < end_dt_for(local.date(), kickoff)
 
 
-def banner_target(now: datetime | None = None, date_overrides: dict | None = None) -> dict:
+def banner_target(
+    now: datetime | None = None,
+    date_overrides: dict | None = None,
+    time_overrides: dict | None = None,
+) -> dict:
     """Yellow-banner target for the nearest upcoming game cycle.
 
     Before that day's enrollment opens: count down to enroll start.
@@ -131,7 +193,7 @@ def banner_target(now: datetime | None = None, date_overrides: dict | None = Non
     else:
         now = now.astimezone(TZ)
 
-    upcoming = [get_slot_state(key, now, date_overrides) for key in SLOTS]
+    upcoming = [get_slot_state(key, now, date_overrides, time_overrides) for key in SLOTS]
     upcoming = [item for item in upcoming if not item["is_ended"]]
     upcoming.sort(key=lambda item: item["game_at"])
     target = upcoming[0]
@@ -261,7 +323,10 @@ def draw_rematch(players: list, hour1_teams: list | None, rng: random.Random | N
 
 
 def get_slot_state(
-    slot_key: str, now: datetime | None = None, date_overrides: dict | None = None
+    slot_key: str,
+    now: datetime | None = None,
+    date_overrides: dict | None = None,
+    time_overrides: dict | None = None,
 ) -> dict:
     """Return the visible upcoming game cycle for a slot.
 
@@ -271,7 +336,8 @@ def get_slot_state(
 
     The displayed week rolls to the next occurrence at 22:01 Israel time.
     The just-ended week is exposed as prev_week_key.
-    Managers can move a cycle to another calendar date; enrollments stay on week_key.
+    Managers can move a cycle to another calendar date or kickoff time;
+    enrollments stay on week_key.
     """
     if slot_key not in SLOTS:
         raise ValueError(f"unknown slot: {slot_key}")
@@ -285,10 +351,15 @@ def get_slot_state(
     spec = SLOTS[slot_key]
     game_weekday = spec["weekday"]
     overrides = date_overrides or {}
+    times = time_overrides or {}
+
+    def kickoff_of(week_iso: str) -> time:
+        return times.get((slot_key, week_iso)) or GAME_TIME
 
     days_ahead = (game_weekday - now.weekday()) % 7
     this_week_date = now.date() + timedelta(days=days_ahead)
-    this_week_end = datetime.combine(this_week_date, GAME_END_TIME, tzinfo=TZ)
+    this_actual = overrides.get((slot_key, this_week_date.isoformat()), this_week_date)
+    this_week_end = end_dt_for(this_actual, kickoff_of(this_week_date.isoformat()))
 
     if now >= this_week_end:
         week_date = this_week_date + timedelta(days=7)
@@ -299,14 +370,15 @@ def get_slot_state(
 
     game_date = week_date
     prev_actual = overrides.get((slot_key, prev_week_date.isoformat()))
-    if prev_actual is not None and now < datetime.combine(prev_actual, GAME_END_TIME, tzinfo=TZ):
+    if prev_actual is not None and now < end_dt_for(prev_actual, kickoff_of(prev_week_date.isoformat())):
         week_date = prev_week_date
         prev_week_date = week_date - timedelta(days=7)
         game_date = prev_actual
     else:
         cur_actual = overrides.get((slot_key, week_date.isoformat()))
+        cur_kick = kickoff_of(week_date.isoformat())
         if cur_actual is not None:
-            if now >= datetime.combine(cur_actual, GAME_END_TIME, tzinfo=TZ):
+            if now >= end_dt_for(cur_actual, cur_kick):
                 week_date = week_date + timedelta(days=7)
                 prev_week_date = week_date - timedelta(days=7)
                 nxt_actual = overrides.get((slot_key, week_date.isoformat()))
@@ -314,26 +386,27 @@ def get_slot_state(
             else:
                 game_date = cur_actual
 
-    game_dt = datetime.combine(game_date, GAME_TIME, tzinfo=TZ)
-    game_end_dt = datetime.combine(game_date, GAME_END_TIME, tzinfo=TZ)
-    enroll_close_dt = datetime.combine(game_date, ENROLL_CLOSE_TIME, tzinfo=TZ)
+    kickoff = kickoff_of(week_date.isoformat())
+    clocks = kickoff_bundle(game_date, kickoff)
+    game_dt = clocks["game_dt"]
+    game_end_dt = clocks["game_end_dt"]
+    enroll_close_dt = clocks["enroll_close_dt"]
+    draw_dt = clocks["draw_dt"]
+    rematch_dt = clocks["rematch_dt"]
     open_dt = datetime.combine(
         week_date - timedelta(days=spec["open_days_before"]),
         ENROLL_OPEN_TIME,
         tzinfo=TZ,
     )
-    prev_end_dt = datetime.combine(
+    prev_end_dt = end_dt_for(
         overrides.get((slot_key, prev_week_date.isoformat()), prev_week_date),
-        GAME_END_TIME,
-        tzinfo=TZ,
+        kickoff_of(prev_week_date.isoformat()),
     )
 
     is_open = open_dt <= now < enroll_close_dt
     is_ended = now >= game_end_dt
     is_past = now >= game_dt
 
-    draw_dt = datetime.combine(game_date, DRAW_TIME, tzinfo=TZ)
-    rematch_dt = datetime.combine(game_date, REMATCH_TIME, tzinfo=TZ)
     teams_ready = now >= draw_dt
     rematch_ready = now >= rematch_dt
 
@@ -356,6 +429,8 @@ def get_slot_state(
         "week_key": week_date.isoformat(),
         "game_date": game_date.isoformat(),
         "date_override": game_date != week_date,
+        "game_time": kickoff.strftime("%H:%M"),
+        "time_override": kickoff != GAME_TIME,
         "prev_week_key": prev_week_date.isoformat() if now >= prev_end_dt else None,
         "game_at": game_dt.isoformat(),
         "game_end_at": game_end_dt.isoformat(),
