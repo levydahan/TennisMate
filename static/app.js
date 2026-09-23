@@ -1526,6 +1526,7 @@ setInterval(tickCountdown, 1000);
 const PONG_WIN = 3;
 let racketClicks = 0;
 let pong = null;
+let rockyCtx = null;
 
 function pongEls() {
   return {
@@ -1539,57 +1540,100 @@ function pongEls() {
   };
 }
 
-function startRockyTheme() {
+function unlockRockyAudio() {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtx) return { stop() {} };
-  const ctx = new AudioCtx();
+  if (!AudioCtx) return null;
+  if (!rockyCtx) rockyCtx = new AudioCtx();
+  if (rockyCtx.state === "suspended") rockyCtx.resume();
+  try {
+    const osc = rockyCtx.createOscillator();
+    const gain = rockyCtx.createGain();
+    gain.gain.value = 0.001;
+    osc.connect(gain);
+    gain.connect(rockyCtx.destination);
+    osc.start();
+    osc.stop(rockyCtx.currentTime + 0.04);
+  } catch (e) {}
+  return rockyCtx;
+}
+
+function startRockyTheme() {
+  const ctx = unlockRockyAudio();
+  if (!ctx) return { stop() {} };
   const master = ctx.createGain();
-  master.gain.value = 0.16;
+  master.gain.value = 0.55;
   master.connect(ctx.destination);
-  const step = 0.22;
-  const motif = [261.63, 311.13, 349.23, 392, 349.23, 311.13, 261.63, 196];
-  const bass = [130.81, 130.81, 155.56, 174.61];
   let alive = true;
+  const loopLen = 3.36;
+  const hits = [
+    [0.00, 261.63, 0.20, 0.7],
+    [0.28, 261.63, 0.20, 0.7],
+    [0.56, 311.13, 0.20, 0.78],
+    [0.84, 349.23, 0.20, 0.82],
+    [1.12, 392.00, 0.72, 0.9],
+    [1.96, 523.25, 0.22, 0.78],
+    [2.24, 466.16, 0.20, 0.72],
+    [2.52, 392.00, 0.58, 0.8],
+  ];
+  const thumps = [0, 0.56, 1.12, 1.68, 2.24, 2.80];
 
   function brass(time, freq, dur, vol) {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
     const filter = ctx.createBiquadFilter();
-    osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(freq, time);
+    const gain = ctx.createGain();
     filter.type = "lowpass";
-    filter.frequency.setValueAtTime(900, time);
-    filter.frequency.linearRampToValueAtTime(1400, time + dur * 0.3);
-    gain.gain.setValueAtTime(0.0001, time);
-    gain.gain.exponentialRampToValueAtTime(vol, time + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, time + dur);
-    osc.connect(filter);
+    filter.frequency.setValueAtTime(1200, time);
+    filter.Q.value = 0.8;
+    filter.frequency.linearRampToValueAtTime(2200, time + Math.min(0.12, dur * 0.4));
+    gain.gain.setValueAtTime(0.001, time);
+    gain.gain.exponentialRampToValueAtTime(vol, time + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
     filter.connect(gain);
     gain.connect(master);
+    ["sawtooth", "square"].forEach((type, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq * (i ? 1.005 : 1), time);
+      osc.connect(filter);
+      osc.start(time);
+      osc.stop(time + dur + 0.03);
+    });
+  }
+
+  function thump(time) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(90, time);
+    osc.frequency.exponentialRampToValueAtTime(42, time + 0.16);
+    gain.gain.setValueAtTime(0.001, time);
+    gain.gain.exponentialRampToValueAtTime(0.7, time + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
+    osc.connect(gain);
+    gain.connect(master);
     osc.start(time);
-    osc.stop(time + dur + 0.02);
+    osc.stop(time + 0.22);
   }
 
-  function loop(from) {
+  function schedule(from) {
     if (!alive) return;
-    motif.forEach((freq, i) => brass(from + i * step, freq, 0.2, 0.22));
-    bass.forEach((freq, i) => brass(from + i * step * 2, freq, 0.38, 0.12));
-    const next = from + motif.length * step;
-    const wait = Math.max(20, (next - ctx.currentTime) * 1000 - 40);
-    setTimeout(() => loop(Math.max(ctx.currentTime + 0.02, next)), wait);
+    hits.forEach(([t, f, d, v]) => brass(from + t, f, d, v));
+    thumps.forEach((t) => thump(from + t));
+    const wait = Math.max(30, (from + loopLen - ctx.currentTime) * 1000 - 40);
+    setTimeout(() => {
+      if (alive) schedule(from + loopLen);
+    }, wait);
   }
 
-  if (ctx.state === "suspended") ctx.resume().catch(() => {});
-  loop(ctx.currentTime + 0.05);
+  const startAt = ctx.currentTime + 0.02;
+  schedule(startAt);
   return {
     stop() {
       alive = false;
       try {
-        master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
+        master.gain.cancelScheduledValues(ctx.currentTime);
+        master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
+        master.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.15);
       } catch (e) {}
-      setTimeout(() => {
-        try { ctx.close(); } catch (err) {}
-      }, 180);
     },
   };
 }
@@ -1758,12 +1802,18 @@ function initPongEgg() {
   const { overlay, canvas, closeBtn, againBtn } = pongEls();
   if (mark) {
     mark.addEventListener("click", () => {
+      unlockRockyAudio();
       racketClicks += 1;
       if (racketClicks >= 10) openPong();
     });
   }
   if (closeBtn) closeBtn.addEventListener("click", closePong);
-  if (againBtn) againBtn.addEventListener("click", startPongMatch);
+  if (againBtn) {
+    againBtn.addEventListener("click", () => {
+      unlockRockyAudio();
+      startPongMatch();
+    });
+  }
   if (overlay) {
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) closePong();
