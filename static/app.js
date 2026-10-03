@@ -75,6 +75,17 @@ function wazeHref(address) {
   return `https://waze.com/ul?q=${q}&navigate=yes`;
 }
 
+const LAZUZ_URL = "https://www.lazuz.co.il/";
+
+function lazuzBookLink(game) {
+  if (!game.is_open) return "";
+  return `
+    <a class="lazuz-link" href="${LAZUZ_URL}" target="_blank" rel="noopener noreferrer">
+      הזמן מגרש בלזוז
+    </a>
+  `;
+}
+
 function wazeButton(game) {
   const address = (game.nav_address || "").trim();
   if (!address) return "";
@@ -480,7 +491,10 @@ function renderGame(game) {
         </div>
         <div class="game-head-end">
           ${wazeButton(game)}
-          <span class="status ${statusClass}">${esc(game.status_he)}</span>
+          <div class="game-status-col">
+            <span class="status ${statusClass}">${esc(game.status_he)}</span>
+            ${lazuzBookLink(game)}
+          </div>
         </div>
       </div>
       <p class="muted">${esc(game.status_detail)}</p>

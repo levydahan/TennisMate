@@ -474,6 +474,37 @@ body.login-only .top-banners {
 .status.closed { background: #fee2e2; color: var(--danger); }
 .status.past { background: #e5e7eb; color: #374151; }
 
+.game-status-col {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.lazuz-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #14532d;
+  color: #d9f99d;
+  font-weight: 800;
+  font-size: 0.82rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.lazuz-link:hover {
+  background: #166534;
+  color: #ecfccb;
+}
+
+.lazuz-link:active {
+  transform: translateY(1px);
+}
+
 @keyframes status-open-flash {
   0%, 100% {
     background: #dcfce7;
