@@ -42,11 +42,18 @@ class SundayEnrollmentTests(unittest.TestCase):
         self.assertTrue(closed["is_past"])
         self.assertFalse(closed["is_ended"])
 
-    def test_teams_not_ready_before_1959(self):
-        now = datetime(2026, 8, 30, 19, 58, tzinfo=TZ)
+    def test_teams_not_ready_before_noon(self):
+        now = datetime(2026, 8, 30, 11, 59, tzinfo=TZ)
         state = get_slot_state("sunday", now)
         self.assertTrue(state["is_open"])
         self.assertFalse(state["teams_ready"])
+        self.assertFalse(state["rematch_ready"])
+
+    def test_both_draws_ready_at_noon(self):
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=TZ)
+        state = get_slot_state("sunday", now)
+        self.assertTrue(state["teams_ready"])
+        self.assertTrue(state["rematch_ready"])
 
     def test_stays_on_same_week_until_2201(self):
         now = datetime(2026, 8, 30, 22, 0, tzinfo=TZ)
@@ -146,11 +153,12 @@ class TeamDrawTests(unittest.TestCase):
         hour2 = draw_rematch(players, hour1, random.Random(2))
         self.assertEqual(forbidden_pairs(hour1), forbidden_pairs(hour2))
 
-    def test_rematch_ready_at_2100(self):
-        before = get_slot_state("sunday", datetime(2026, 8, 30, 20, 59, tzinfo=TZ))
-        self.assertTrue(before["teams_ready"])
+    def test_rematch_ready_at_noon(self):
+        before = get_slot_state("sunday", datetime(2026, 8, 30, 11, 59, tzinfo=TZ))
+        self.assertFalse(before["teams_ready"])
         self.assertFalse(before["rematch_ready"])
-        after = get_slot_state("sunday", datetime(2026, 8, 30, 21, 0, tzinfo=TZ))
+        after = get_slot_state("sunday", datetime(2026, 8, 30, 12, 0, tzinfo=TZ))
+        self.assertTrue(after["teams_ready"])
         self.assertTrue(after["rematch_ready"])
 
 

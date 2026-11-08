@@ -9,9 +9,9 @@ from players import canonical_player
 
 TZ = ZoneInfo("Asia/Jerusalem")
 GAME_TIME = time(20, 0)
-DRAW_TIME = time(19, 59)
+DRAW_TIME = time(12, 0)
 HOUR_BEFORE_TIME = time(19, 0)
-REMATCH_TIME = time(21, 0)
+REMATCH_TIME = time(12, 0)
 PAY_REMIND_TIME = time(21, 1)
 GAME_END_TIME = time(22, 1)
 ENROLL_OPEN_TIME = time(21, 30)
@@ -77,20 +77,22 @@ def kickoff_bundle(play_date: date, kickoff: time | None = None) -> dict:
     """Kickoff and derived clocks (draw, rematch, enroll close, end)."""
     kickoff = kickoff or GAME_TIME
     game_dt = datetime.combine(play_date, kickoff, tzinfo=TZ)
+    draw_dt = datetime.combine(play_date, DRAW_TIME, tzinfo=TZ)
+    rematch_dt = datetime.combine(play_date, REMATCH_TIME, tzinfo=TZ)
     if kickoff == GAME_TIME:
         return {
             "game_dt": game_dt,
             "game_end_dt": datetime.combine(play_date, GAME_END_TIME, tzinfo=TZ),
             "enroll_close_dt": datetime.combine(play_date, ENROLL_CLOSE_TIME, tzinfo=TZ),
-            "draw_dt": datetime.combine(play_date, DRAW_TIME, tzinfo=TZ),
-            "rematch_dt": datetime.combine(play_date, REMATCH_TIME, tzinfo=TZ),
+            "draw_dt": draw_dt,
+            "rematch_dt": rematch_dt,
         }
     return {
         "game_dt": game_dt,
         "game_end_dt": game_dt + timedelta(hours=2, minutes=1),
         "enroll_close_dt": game_dt + timedelta(hours=2),
-        "draw_dt": game_dt - timedelta(minutes=1),
-        "rematch_dt": game_dt + timedelta(hours=1),
+        "draw_dt": draw_dt,
+        "rematch_dt": rematch_dt,
     }
 
 
