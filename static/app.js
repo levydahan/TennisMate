@@ -572,28 +572,47 @@ function hebrewGames(n) {
   return n === 1 ? "משחק אחד" : `${n} משחקים`;
 }
 
-// Top partner: who the player was drawn with most, how often, and how many
-// games they both played. With a tie every top partner is listed with its own games count.
-function statsPartnerHtml(partner) {
+function sharedGames(n) {
+  return n === 1 ? "משחק משותף אחד" : `${n} משחקים משותפים`;
+}
+
+// Top partner, shown separately for the first and the second hour: who the player
+// was drawn with most in that hour, how often, and out of how many shared games.
+// With a tie every top partner is listed with its own games count.
+function statsHourPartnerHtml(label, partner) {
   if (!partner || !partner.names || !partner.names.length) {
-    return `<span class="stats-partner-none">עדיין לא הוגרל עם אף אחד</span>`;
+    return `
+      <div class="stats-partner-hour">
+        <span class="stats-partner-hour-label">${label}:</span>
+        <span class="stats-partner-none">עדיין לא הוגרל עם אף אחד</span>
+      </div>`;
   }
   const together = partner.games_together || {};
   const single = partner.names.length === 1;
   const names = partner.names.map((name) => {
     const games = together[name];
     const extra = !single && games != null
-      ? ` <span class="stats-partner-games">(${hebrewGames(games)})</span>`
+      ? ` <span class="stats-partner-games">(מתוך ${hebrewGames(games)})</span>`
       : "";
     return `<strong>${esc(name)}</strong>${extra}`;
   }).join(" · ");
-  const drawn = `הוגרלו יחד ${hebrewTimes(partner.times)}${single ? "" : " כל אחד"}`;
   const games = single && together[partner.names[0]] != null
-    ? ` · שיחקו יחד ב־${hebrewGames(together[partner.names[0]])}`
+    ? ` מתוך ${sharedGames(together[partner.names[0]])}`
     : "";
+  const drawn = `הוגרלו יחד ${hebrewTimes(partner.times)}${single ? "" : " כל אחד"}${games}`;
   return `
-    <span class="stats-partner-names">${names}</span>
-    <span class="stats-partner-times">${drawn}${games}</span>
+    <div class="stats-partner-hour">
+      <span class="stats-partner-hour-label">${label}:</span>
+      <span class="stats-partner-names">${names}</span>
+      <span class="stats-partner-times">${drawn}</span>
+    </div>`;
+}
+
+function statsPartnerHtml(partners) {
+  const hours = partners || {};
+  return `
+    ${statsHourPartnerHtml("שעה ראשונה", hours.hour1)}
+    ${statsHourPartnerHtml("שעה שנייה", hours.hour2)}
   `;
 }
 

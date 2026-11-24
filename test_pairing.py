@@ -350,50 +350,73 @@ class StatsPartnerTests(unittest.TestCase):
     def _player(self, stats, name):
         return next(p for p in stats["players"] if p["name"] == name)
 
-    def test_top_partner_counts_both_hours_and_attendance(self):
+    def test_top_partner_is_reported_separately_per_hour(self):
         from app import attendance_stats
 
         six = ["אבירם", "רועי", "חן", "יגאל", "עידן", "לוי"]
+        # אבירם: hour 1 with רועי twice; hour 2 with חן, then יגאל, then חן.
         self._game("2026-01-04", six, [("אבירם", "רועי"), ("חן", "יגאל"), ("עידן", "לוי")],
                    [("אבירם", "חן"), ("רועי", "עידן"), ("יגאל", "לוי")])
         self._game("2026-01-11", six, [("אבירם", "רועי"), ("חן", "עידן"), ("יגאל", "לוי")],
                    [("אבירם", "יגאל"), ("רועי", "לוי"), ("חן", "עידן")])
-        # A third game that אבירם missed.
-        self._game("2026-01-18", [n for n in six if n != "אבירם"],
+        self._game("2026-01-18", six, [("אבירם", "עידן"), ("חן", "יגאל"), ("רועי", "לוי")],
+                   [("אבירם", "חן"), ("רועי", "עידן"), ("יגאל", "לוי")])
+        # A fourth game אבירם missed: nobody of his can be drawn with him there.
+        self._game("2026-01-25", [n for n in six if n != "אבירם"],
                    [("רועי", "חן"), ("יגאל", "עידן")], [])
 
         stats = attendance_stats()
-        self.assertEqual(stats["games"], 3)
-
+        self.assertEqual(stats["games"], 4)
         aviram = self._player(stats, "אבירם")
-        self.assertEqual((aviram["arrived"], aviram["missed"]), (2, 1))
-        # אבירם played 2 games, both with רועי, and was drawn with him in each.
+        self.assertEqual((aviram["arrived"], aviram["missed"]), (3, 1))
         self.assertEqual(
             aviram["top_partner"],
-            {"names": ["רועי"], "times": 2, "games_together": {"רועי": 2}},
+            {
+                "hour1": {"names": ["רועי"], "times": 2, "games_together": {"רועי": 3}},
+                "hour2": {"names": ["חן"], "times": 2, "games_together": {"חן": 3}},
+            },
         )
 
-        # יגאל+לוי were drawn together twice and both attended all 3 games.
-        yigal = self._player(stats, "יגאל")
-        self.assertEqual(
-            yigal["top_partner"],
-            {"names": ["לוי"], "times": 2, "games_together": {"לוי": 3}},
-        )
+    def test_games_together_only_counts_games_where_that_hour_was_drawn(self):
+        from app import attendance_stats
+
+        six = ["אבירם", "רועי", "חן", "יגאל", "עידן", "לוי"]
+        five = ["אבירם", "רועי", "חן", "יגאל", "עידן"]
+        self._game("2026-01-04", six, [("אבירם", "רועי"), ("חן", "יגאל"), ("עידן", "לוי")],
+                   [("אבירם", "חן"), ("רועי", "עידן"), ("יגאל", "לוי")])
+        # A 5-player game has no second hour, so it must not count towards hour 2.
+        self._game("2026-01-11", five, [("אבירם", "רועי"), ("חן", "יגאל"), ("עידן",)], [])
+
+        top = self._player(attendance_stats(), "אבירם")["top_partner"]
+        self.assertEqual(top["hour1"], {"names": ["רועי"], "times": 2, "games_together": {"רועי": 2}})
+        self.assertEqual(top["hour2"], {"names": ["חן"], "times": 1, "games_together": {"חן": 1}})
+        # Drawn together can never exceed the games they shared in that hour.
+        for hour in ("hour1", "hour2"):
+            part = top[hour]
+            self.assertLessEqual(part["times"], min(part["games_together"].values()))
+
+    def test_hour_without_a_draw_is_none(self):
+        from app import attendance_stats
+
+        five = ["אבירם", "רועי", "חן", "יגאל", "עידן"]
+        self._game("2026-01-04", five, [("אבירם", "רועי"), ("חן", "יגאל"), ("עידן",)], [])
+        top = self._player(attendance_stats(), "אבירם")["top_partner"]
+        self.assertEqual(top["hour1"]["names"], ["רועי"])
+        self.assertIsNone(top["hour2"])
 
     def test_my_stats_carries_the_logged_in_players_top_partner(self):
         from app import User, attendance_stats, my_stats
 
         six = ["אבירם", "רועי", "חן", "יגאל", "עידן", "לוי"]
-        self._game("2026-01-04", six, [("אבירם", "רועי"), ("חן", "יגאל"), ("עידן", "לוי")])
-        self._game("2026-01-11", six, [("אבירם", "רועי"), ("חן", "עידן"), ("יגאל", "לוי")])
+        self._game("2026-01-04", six, [("אבירם", "רועי"), ("חן", "יגאל"), ("עידן", "לוי")],
+                   [("אבירם", "חן"), ("רועי", "עידן"), ("יגאל", "לוי")])
         user = User(email="a@example.com", password_hash="x", name="אבירם")
         self.db.session.add(user)
         self.db.session.commit()
 
         mine = my_stats(user, attendance_stats())
-        self.assertEqual(
-            mine["top_partner"], {"names": ["רועי"], "times": 2, "games_together": {"רועי": 2}}
-        )
+        self.assertEqual(mine["top_partner"]["hour1"]["names"], ["רועי"])
+        self.assertEqual(mine["top_partner"]["hour2"]["names"], ["חן"])
         # Works without passing stats too, and a user who never played has none.
         self.assertEqual(my_stats(user)["top_partner"], mine["top_partner"])
         other = User(email="b@example.com", password_hash="x", name="מושיקו")
@@ -409,10 +432,10 @@ class StatsPartnerTests(unittest.TestCase):
         self._game("2026-01-11", six, [("אבירם", "חן"), ("רועי", "יגאל"), ("עידן", "לוי")])
 
         stats = attendance_stats()
-        top = self._player(stats, "אבירם")["top_partner"]
-        self.assertEqual(top["times"], 1)
-        self.assertEqual(top["names"], sorted(["רועי", "חן"]))
-        self.assertEqual(top["games_together"], {"חן": 2, "רועי": 2})
+        hour1 = self._player(stats, "אבירם")["top_partner"]["hour1"]
+        self.assertEqual(hour1["times"], 1)
+        self.assertEqual(hour1["names"], sorted(["רועי", "חן"]))
+        self.assertEqual(hour1["games_together"], {"חן": 2, "רועי": 2})
         # Someone who never attended a drawn game has no partner.
         self.assertIsNone(self._player(stats, "שירן")["top_partner"])
 
