@@ -578,7 +578,7 @@ function statsPartnerHtml(partner) {
   const eachSuffix = partner.names.length > 1 ? " כל אחד" : "";
   return `
     <span class="stats-partner-names">${names}</span>
-    <span class="stats-partner-times">שיחקו יחד ${hebrewTimes(partner.times)}${eachSuffix}</span>
+    <span class="stats-partner-times">שיחקו איתך ${hebrewTimes(partner.times)}${eachSuffix}</span>
   `;
 }
 
