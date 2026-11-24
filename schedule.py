@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import random
 
+from pairing import generate_second_hour, generate_tennis_teams
 from players import canonical_player
 
 TZ = ZoneInfo("Asia/Jerusalem")
@@ -19,9 +20,6 @@ ENROLL_CLOSE_TIME = time(22, 0)
 MAX_PLAYERS = 6
 FIELD_COST_NIS = 60
 TEAM_LETTERS = "אבגדהו"
-FORBIDDEN_TEAMMATES = (
-    frozenset({"יגאל", "רועי"}),
-)
 
 DAYS_HE = [
     "יום שני",
@@ -216,9 +214,44 @@ def format_dt_he(dt: datetime) -> str:
     return f"{DAYS_HE[dt.weekday()]} {dt.strftime('%d.%m.%Y')} בשעה {dt.strftime('%H:%M')}"
 
 
-def draw_teams(players: list, rng: random.Random | None = None) -> list[dict]:
-    """Shuffle players and pair them into teams of 2. A leftover player is a team of 1."""
-    return _pick_pairing(players, rng or random.Random())
+def draw_teams(
+    players: list,
+    rng: random.Random | None = None,
+    history: list[dict] | None = None,
+) -> list[dict]:
+    """Pair players into teams of 2 for the first hour.
+
+    With 5 or 6 players the history-based algorithm in ``pairing`` is used: pairs
+    that played together recently are avoided. With 5 players only the opening
+    lineup is chosen (2 pairs + the single player who waits first). Any other
+    head-count falls back to a random pairing. ``history`` is a list of
+    ``{"date": ..., "pairs": [(name, name), ...]}``.
+    """
+    rng = rng or random.Random()
+    by_name = _players_by_unique_name(players) if len(players) in (5, 6) else None
+    if by_name is None:
+        return _pick_pairing(players, rng)
+    result = generate_tennis_teams(
+        list(by_name), history or [], rng=rng
+    )
+    if result["mode"] == "6_players":
+        pairs = result["hour_1"]
+        chunks = [[by_name[a], by_name[b]] for a, b in pairs]
+    else:
+        chunks = [[by_name[a], by_name[b]] for a, b in result["opening_pairs"]]
+        chunks.append([by_name[result["waiting_first"]]])
+    return _chunks_to_teams(chunks)
+
+
+def _players_by_unique_name(players: list) -> dict[str, dict] | None:
+    """Map canonical name -> player, or None if two players share a name."""
+    by_name = {}
+    for player in players:
+        name = _player_name(player)
+        if name in by_name:
+            return None
+        by_name[name] = player
+    return by_name
 
 
 def _pair_chunks(players: list) -> list[list]:
@@ -261,21 +294,6 @@ def _player_name(player: dict) -> str:
     return canonical_player(raw) or raw
 
 
-def _name_pair_key(chunk: list) -> frozenset | None:
-    names = [_player_name(player) for player in chunk]
-    if len(names) == 2:
-        return frozenset(names)
-    return None
-
-
-def blocked_teammate_pairs(chunks: list[list]) -> int:
-    return sum(
-        1
-        for chunk in chunks
-        if (key := _name_pair_key(chunk)) and key in FORBIDDEN_TEAMMATES
-    )
-
-
 def _pick_pairing(players: list, rng: random.Random, hour1_teams: list | None = None) -> list[dict]:
     if len(players) < 2:
         leftover = list(players)
@@ -285,9 +303,8 @@ def _pick_pairing(players: list, rng: random.Random, hour1_teams: list | None = 
     candidates = list(generate_pairings(players))
     rng.shuffle(candidates)
 
-    def score(chunks: list[list]) -> tuple[int, int]:
-        repeats = sum(1 for chunk in chunks if (key := _pair_key(chunk)) and key in forbidden)
-        return (blocked_teammate_pairs(chunks), repeats)
+    def score(chunks: list[list]) -> int:
+        return sum(1 for chunk in chunks if (key := _pair_key(chunk)) and key in forbidden)
 
     return _chunks_to_teams(min(candidates, key=score))
 
@@ -319,9 +336,45 @@ def generate_pairings(players: list):
     yield from _even_pairings(players)
 
 
-def draw_rematch(players: list, hour1_teams: list | None, rng: random.Random | None = None) -> list[dict]:
-    """Pair again, avoiding first-hour partners whenever any alternative exists."""
-    return _pick_pairing(players, rng or random.Random(), hour1_teams)
+def draw_rematch(
+    players: list,
+    hour1_teams: list | None,
+    rng: random.Random | None = None,
+    history: list[dict] | None = None,
+) -> list[dict]:
+    """Second-hour teams: no first-hour partners are repeated.
+
+    With 6 players the history-based algorithm picks 3 completely new pairs.
+    With 5 players there is no second-hour draw (games rotate by results), so an
+    empty list is returned. Other head-counts fall back to a random pairing that
+    avoids first-hour partners whenever any alternative exists.
+    """
+    rng = rng or random.Random()
+    if len(players) == 5:
+        return []
+    by_name = _players_by_unique_name(players) if len(players) == 6 else None
+    if by_name is not None:
+        hour1_pairs = _hour1_name_pairs(hour1_teams, set(by_name))
+        if hour1_pairs is not None:
+            pairs = generate_second_hour(
+                list(by_name), hour1_pairs, history or [], rng=rng
+            )
+            return _chunks_to_teams([[by_name[a], by_name[b]] for a, b in pairs])
+    return _pick_pairing(players, rng, hour1_teams)
+
+
+def _hour1_name_pairs(hour1_teams: list | None, names: set[str]) -> list[tuple[str, str]] | None:
+    """First-hour pairs by name, or None if they are not a full split of ``names``."""
+    pairs = []
+    for team in hour1_teams or []:
+        members = [_player_name(player) for player in team.get("players") or []]
+        if len(members) != 2:
+            return None
+        pairs.append((members[0], members[1]))
+    flat = [name for pair in pairs for name in pair]
+    if len(flat) != len(names) or set(flat) != names:
+        return None
+    return pairs
 
 
 def get_slot_state(

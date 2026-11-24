@@ -12,6 +12,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from pairing import explain_pairs
 from players import FIXED_PLAYERS, canonical_player, normalize_name
 from reminders import (
     build_hour_before_message,
@@ -508,6 +509,68 @@ def resolve_booker(settings: GameSettings | None, roster: list[dict]) -> tuple[i
     return None, display
 
 
+def _team_name_pairs(teams_json: str | None) -> list[tuple[str, str]]:
+    """Two-player teams from a stored draw, as name pairs."""
+    if not teams_json:
+        return []
+    try:
+        teams = json.loads(teams_json)
+    except ValueError:
+        return []
+    pairs = []
+    for team in teams or []:
+        names = [
+            canonical_player(player.get("name") or "") or player.get("name") or ""
+            for player in team.get("players") or []
+        ]
+        if len(names) == 2 and all(names):
+            pairs.append((names[0], names[1]))
+    return pairs
+
+
+def pairing_history(slot: str, week_key: str) -> list[dict]:
+    """Past sessions (date + pairs that played) for the pairing algorithm.
+
+    Built from the teams stored for earlier games, both slots together,
+    excluding the game being drawn and anything after it.
+    """
+    history = []
+    rows = GameSettings.query.filter(GameSettings.week_key < week_key).all()
+    for row in rows:
+        pairs = _team_name_pairs(row.teams_json) + _team_name_pairs(row.teams2_json)
+        if pairs:
+            history.append({"date": row.week_key, "pairs": pairs})
+    return history
+
+
+def _team_names(team: dict) -> list[str]:
+    return [
+        canonical_player(player.get("name") or "") or (player.get("name") or "")
+        for player in team.get("players") or []
+    ]
+
+
+def draw_explanation(
+    roster: list[dict], teams: list | None, teams2: list | None, history: list[dict]
+) -> dict | None:
+    """Why this draw was chosen, in terms of the pair history."""
+    if not teams:
+        return None
+    names = [canonical_player(player["name"]) or player["name"] for player in roster]
+    hour1 = [_team_names(team) for team in teams]
+    waiting = next((n[0] for n in hour1 if len(n) == 1), None)
+    why = {
+        "players": len(roster),
+        "waiting": waiting,
+        "hour1": explain_pairs(names, [tuple(n) for n in hour1 if len(n) == 2], history),
+        "hour2": None,
+    }
+    if teams2:
+        hour2 = [_team_names(team) for team in teams2]
+        why["hour2"] = explain_pairs(names, [tuple(n) for n in hour2 if len(n) == 2], history)
+    return why
+
+
 def ensure_teams(
     slot: str, week_key: str, roster: list[dict], teams_ready: bool, rematch_ready: bool = False
 ) -> tuple[list | None, list | None]:
@@ -524,7 +587,7 @@ def ensure_teams(
     if settings.teams_json and settings.teams_ids == ids:
         hour1 = json.loads(settings.teams_json)
     else:
-        hour1 = draw_teams(roster) if roster else []
+        hour1 = draw_teams(roster, history=pairing_history(slot, week_key)) if roster else []
         settings.teams_json = json.dumps(hour1, ensure_ascii=False)
         settings.teams_ids = ids
         settings.teams2_json = None
@@ -535,7 +598,11 @@ def ensure_teams(
         if settings.teams2_json and settings.teams2_ids == ids:
             hour2 = json.loads(settings.teams2_json)
         else:
-            hour2 = draw_rematch(roster, hour1) if roster else []
+            hour2 = (
+                draw_rematch(roster, hour1, history=pairing_history(slot, week_key))
+                if roster
+                else []
+            )
             settings.teams2_json = json.dumps(hour2, ensure_ascii=False)
             settings.teams2_ids = ids
             db.session.commit()
@@ -566,6 +633,9 @@ def players_payload(
     share = round(cost / n, 2) if n else None
     booker_id, booker_name = resolve_booker(settings, roster)
     teams, teams2 = ensure_teams(slot, week_key, roster, teams_ready, rematch_ready)
+    teams_why = (
+        draw_explanation(roster, teams, teams2, pairing_history(slot, week_key)) if teams else None
+    )
     return {
         "roster": roster,
         "waiting": waiting,
@@ -580,6 +650,7 @@ def players_payload(
         "booker_name": booker_name,
         "teams": teams,
         "teams2": teams2,
+        "teams_why": teams_why,
     }
 
 

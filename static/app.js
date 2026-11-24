@@ -210,7 +210,9 @@ function renderTeams(game) {
          <h4>שעה שנייה · ${esc(formatGameClock(game, 1))}</h4>
          ${renderTeamGrid(game.teams2)}
        </div>`
-    : `<p class="draw-note">ב־${esc(game.rematch_at_he || formatGameClock(game, 1))} הגרלה מחדש — בלי אותם זוגות</p>`;
+    : game.count === 5
+      ? `<p class="draw-note">בחמישה שחקנים נקבע רק ההרכב הפותח — ההמשך לפי תוצאות המשחק</p>`
+      : `<p class="draw-note">ב־${esc(game.rematch_at_he || formatGameClock(game, 1))} הגרלה מחדש — בלי אותם זוגות</p>`;
   return `
     <div class="teams">
       <h4>שעה ראשונה · ${esc(formatGameClock(game))}</h4>
