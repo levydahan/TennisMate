@@ -369,13 +369,31 @@ class StatsPartnerTests(unittest.TestCase):
         self.assertEqual(stats["games"], 4)
         aviram = self._player(stats, "אבירם")
         self.assertEqual((aviram["arrived"], aviram["missed"]), (3, 1))
+        top = aviram["top_partner"]
+        self.assertEqual(top["hour1"], {"names": ["רועי"], "times": 2, "games_together": {"רועי": 3}})
+        self.assertEqual(top["hour2"], {"names": ["חן"], "times": 2, "games_together": {"חן": 3}})
+        # Overall (both hours): רועי 2 and חן 2 tie, each shared all 3 drawn games.
         self.assertEqual(
-            aviram["top_partner"],
-            {
-                "hour1": {"names": ["רועי"], "times": 2, "games_together": {"רועי": 3}},
-                "hour2": {"names": ["חן"], "times": 2, "games_together": {"חן": 3}},
-            },
+            top["overall"],
+            {"names": ["חן", "רועי"], "times": 2, "games_together": {"חן": 3, "רועי": 3}},
         )
+
+    def test_overall_top_partner_adds_both_hours(self):
+        from app import attendance_stats
+
+        six = ["אבירם", "רועי", "חן", "יגאל", "עידן", "לוי"]
+        # רועי: hour 1 twice + hour 2 once = 3 overall; חן only twice (hour 2).
+        self._game("2026-01-04", six, [("אבירם", "רועי"), ("חן", "יגאל"), ("עידן", "לוי")],
+                   [("אבירם", "חן"), ("רועי", "עידן"), ("יגאל", "לוי")])
+        self._game("2026-01-11", six, [("אבירם", "רועי"), ("חן", "עידן"), ("יגאל", "לוי")],
+                   [("אבירם", "חן"), ("רועי", "לוי"), ("יגאל", "עידן")])
+        self._game("2026-01-18", six, [("אבירם", "יגאל"), ("חן", "עידן"), ("רועי", "לוי")],
+                   [("אבירם", "רועי"), ("חן", "לוי"), ("יגאל", "עידן")])
+
+        top = self._player(attendance_stats(), "אבירם")["top_partner"]
+        self.assertEqual(top["overall"], {"names": ["רועי"], "times": 3, "games_together": {"רועי": 3}})
+        self.assertEqual(top["hour1"]["names"], ["רועי"])
+        self.assertEqual(top["hour2"]["names"], ["חן"])
 
     def test_games_together_only_counts_games_where_that_hour_was_drawn(self):
         from app import attendance_stats
@@ -417,6 +435,7 @@ class StatsPartnerTests(unittest.TestCase):
         mine = my_stats(user, attendance_stats())
         self.assertEqual(mine["top_partner"]["hour1"]["names"], ["רועי"])
         self.assertEqual(mine["top_partner"]["hour2"]["names"], ["חן"])
+        self.assertEqual(mine["top_partner"]["overall"]["names"], ["חן", "רועי"])
         # Works without passing stats too, and a user who never played has none.
         self.assertEqual(my_stats(user)["top_partner"], mine["top_partner"])
         other = User(email="b@example.com", password_hash="x", name="מושיקו")

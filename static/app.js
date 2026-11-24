@@ -580,10 +580,11 @@ function sharedGames(n) {
 // was drawn with most in that hour, how often, and out of how many shared games.
 // With a tie every top partner is listed with its own games count.
 function statsHourPartnerHtml(label, partner) {
+  const labelHtml = label ? `<span class="stats-partner-hour-label">${label}:</span>` : "";
   if (!partner || !partner.names || !partner.names.length) {
     return `
       <div class="stats-partner-hour">
-        <span class="stats-partner-hour-label">${label}:</span>
+        ${labelHtml}
         <span class="stats-partner-none">עדיין לא הוגרל עם אף אחד</span>
       </div>`;
   }
@@ -602,10 +603,15 @@ function statsHourPartnerHtml(label, partner) {
   const drawn = `הוגרלו יחד ${hebrewTimes(partner.times)}${single ? "" : " כל אחד"}${games}`;
   return `
     <div class="stats-partner-hour">
-      <span class="stats-partner-hour-label">${label}:</span>
+      ${labelHtml}
       <span class="stats-partner-names">${names}</span>
       <span class="stats-partner-times">${drawn}</span>
     </div>`;
+}
+
+// Home screen: just the one player he was drawn with most, both hours together.
+function homePartnerHtml(partners) {
+  return statsHourPartnerHtml("", partners && partners.overall);
 }
 
 function statsPartnerHtml(partners) {
@@ -887,7 +893,7 @@ function renderHome() {
       </ul>
       <div class="stats-partner welcome-partner">
         <span class="stats-partner-label">השותף המוביל</span>
-        <span class="stats-partner-value">${statsPartnerHtml(mine.top_partner)}</span>
+        <span class="stats-partner-value">${homePartnerHtml(mine.top_partner)}</span>
       </div>
       ${cta}
       <button id="notifyBtn" class="ghost-btn notify-btn" type="button">${
