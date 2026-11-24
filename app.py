@@ -688,44 +688,16 @@ def known_stat_names() -> list[str]:
     return names
 
 
-def top_partner(counts: dict[str, int], together: dict[str, int] | None = None) -> dict | None:
-    """The teammate(s) a player was drawn with most often in one hour, or None.
+def top_partner(counts: dict[str, int]) -> dict | None:
+    """The teammate a player was drawn with most often across all finished games.
 
-    ``times`` is how often they were drawn as teammates; ``games_together`` is how
-    many games each top partner and the player both played in where that hour was drawn.
+    Returns ``{"names": [...], "times": N}``. ``names`` has a single player unless
+    several are tied for the most; None if the player was never drawn with anyone.
     """
     if not counts:
         return None
     best = max(counts.values())
-    names = sorted(name for name, times in counts.items() if times == best)
-    together = together or {}
-    return {
-        "names": names,
-        "times": best,
-        "games_together": {name: together.get(name, 0) for name in names},
-    }
-
-
-def top_partners_by_hour(
-    counts_by_hour: dict[str, dict[str, int]],
-    together_by_hour: dict[str, dict[str, int]],
-    overall_together: dict[str, int] | None = None,
-) -> dict | None:
-    """Leading partner overall (both hours together) and for each hour separately.
-
-    Any entry is None if the player was never drawn in that scope; the whole result
-    is None if the player was never drawn at all.
-    """
-    overall_counts: dict[str, int] = {}
-    for counts in counts_by_hour.values():
-        for name, times in counts.items():
-            overall_counts[name] = overall_counts.get(name, 0) + times
-    result = {
-        hour: top_partner(counts_by_hour.get(hour, {}), together_by_hour.get(hour, {}))
-        for hour in ("hour1", "hour2")
-    }
-    result["overall"] = top_partner(overall_counts, overall_together)
-    return result if result["overall"] else None
+    return {"names": sorted(name for name, times in counts.items() if times == best), "times": best}
 
 
 def attendance_stats() -> dict:
@@ -777,39 +749,20 @@ def attendance_stats() -> dict:
             ])
             if booker_name:
                 booker_name = canonical_player(booker_name) or booker_name
-            hour_pairs = {
-                "hour1": _team_name_pairs(settings.teams_json) if settings else [],
-                "hour2": _team_name_pairs(settings.teams2_json) if settings else [],
-            }
-            finished.append((week_key, slot, arrived_names, booker_name, hour_pairs))
+            drawn_pairs = (
+                _team_name_pairs(settings.teams_json) + _team_name_pairs(settings.teams2_json)
+                if settings
+                else []
+            )
+            finished.append((week_key, slot, arrived_names, booker_name, drawn_pairs))
 
     finished.sort(key=lambda item: (item[0], item[1]))
-    hours = ("hour1", "hour2")
-    partner_counts = {hour: {name: {} for name in names} for hour in hours}
-    together_counts = {hour: {name: {} for name in names} for hour in hours}
-    overall_together = {name: {} for name in names}
-    for _week_key, _slot, arrived_names, booker_name, hour_pairs in finished:
-        attended = [name for name in names if name in arrived_names]
-        if any(hour_pairs[hour] for hour in hours):
-            for first in attended:
-                for second in attended:
-                    if first != second:
-                        shared = overall_together[first]
-                        shared[second] = shared.get(second, 0) + 1
-        for hour in hours:
-            pairs = hour_pairs[hour]
-            if not pairs:
-                continue  # this hour was never drawn (e.g. 5 players have no second hour)
-            for first, second in pairs:
-                if first in names and second in names and first != second:
-                    counts = partner_counts[hour]
-                    counts[first][second] = counts[first].get(second, 0) + 1
-                    counts[second][first] = counts[second].get(first, 0) + 1
-            for first in attended:
-                for second in attended:
-                    if first != second:
-                        together = together_counts[hour][first]
-                        together[second] = together.get(second, 0) + 1
+    partner_counts: dict[str, dict[str, int]] = {name: {} for name in names}
+    for _week_key, _slot, arrived_names, booker_name, drawn_pairs in finished:
+        for first, second in drawn_pairs:
+            if first in partner_counts and second in partner_counts and first != second:
+                partner_counts[first][second] = partner_counts[first].get(second, 0) + 1
+                partner_counts[second][first] = partner_counts[second].get(first, 0) + 1
         for name in names:
             row = tallies[name]
             arrived = name in arrived_names
@@ -825,11 +778,7 @@ def attendance_stats() -> dict:
         row = tallies[name]
         total = row["arrived"] + row["missed"]
         row["not_booked"] = max(total - row["booked"], 0)
-        row["top_partner"] = top_partners_by_hour(
-            {hour: partner_counts[hour].get(row["name"], {}) for hour in hours},
-            {hour: together_counts[hour].get(row["name"], {}) for hour in hours},
-            overall_together.get(row["name"], {}),
-        )
+        row["top_partner"] = top_partner(partner_counts.get(row["name"], {}))
         if len(row["arrival_history"]) > spark_max:
             row["arrival_history"] = row["arrival_history"][-spark_max:]
             row["booker_history"] = row["booker_history"][-spark_max:]

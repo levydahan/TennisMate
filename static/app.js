@@ -568,57 +568,17 @@ function hebrewTimes(n) {
   return n === 1 ? "פעם אחת" : `${n} פעמים`;
 }
 
-function hebrewGames(n) {
-  return n === 1 ? "משחק אחד" : `${n} משחקים`;
-}
-
-function sharedGames(n) {
-  return n === 1 ? "משחק משותף אחד" : `${n} משחקים משותפים`;
-}
-
-// Top partner, shown separately for the first and the second hour: who the player
-// was drawn with most in that hour, how often, and out of how many shared games.
-// With a tie every top partner is listed with its own games count.
-function statsHourPartnerHtml(label, partner) {
-  const labelHtml = label ? `<span class="stats-partner-hour-label">${label}:</span>` : "";
+// Leading partner: the player he was drawn with most across all finished games.
+// One name, unless several players are tied for the most.
+function statsPartnerHtml(partner) {
   if (!partner || !partner.names || !partner.names.length) {
-    return `
-      <div class="stats-partner-hour">
-        ${labelHtml}
-        <span class="stats-partner-none">עדיין לא הוגרל עם אף אחד</span>
-      </div>`;
+    return `<span class="stats-partner-none">עדיין לא הוגרל עם אף אחד</span>`;
   }
-  const together = partner.games_together || {};
-  const single = partner.names.length === 1;
-  const names = partner.names.map((name) => {
-    const games = together[name];
-    const extra = !single && games != null
-      ? ` <span class="stats-partner-games">(מתוך ${hebrewGames(games)})</span>`
-      : "";
-    return `<strong>${esc(name)}</strong>${extra}`;
-  }).join(" · ");
-  const games = single && together[partner.names[0]] != null
-    ? ` מתוך ${sharedGames(together[partner.names[0]])}`
-    : "";
-  const drawn = `הוגרלו יחד ${hebrewTimes(partner.times)}${single ? "" : " כל אחד"}${games}`;
+  const names = partner.names.map((name) => `<strong>${esc(name)}</strong>`).join(" · ");
+  const eachSuffix = partner.names.length > 1 ? " כל אחד" : "";
   return `
-    <div class="stats-partner-hour">
-      ${labelHtml}
-      <span class="stats-partner-names">${names}</span>
-      <span class="stats-partner-times">${drawn}</span>
-    </div>`;
-}
-
-// Home screen: just the one player he was drawn with most, both hours together.
-function homePartnerHtml(partners) {
-  return statsHourPartnerHtml("", partners && partners.overall);
-}
-
-function statsPartnerHtml(partners) {
-  const hours = partners || {};
-  return `
-    ${statsHourPartnerHtml("שעה ראשונה", hours.hour1)}
-    ${statsHourPartnerHtml("שעה שנייה", hours.hour2)}
+    <span class="stats-partner-names">${names}</span>
+    <span class="stats-partner-times">שיחקו יחד ${hebrewTimes(partner.times)}${eachSuffix}</span>
   `;
 }
 
@@ -893,7 +853,7 @@ function renderHome() {
       </ul>
       <div class="stats-partner welcome-partner">
         <span class="stats-partner-label">השותף המוביל</span>
-        <span class="stats-partner-value">${homePartnerHtml(mine.top_partner)}</span>
+        <span class="stats-partner-value">${statsPartnerHtml(mine.top_partner)}</span>
       </div>
       ${cta}
       <button id="notifyBtn" class="ghost-btn notify-btn" type="button">${

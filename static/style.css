@@ -904,23 +904,6 @@ body.login-only .top-banners {
   color: #052e16;
 }
 
-.stats-partner-hour {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 6px 0;
-}
-
-.stats-partner-hour + .stats-partner-hour {
-  border-top: 1px solid #bbf7d0;
-}
-
-.stats-partner-hour-label {
-  font-size: 0.82rem;
-  font-weight: 800;
-  color: #365314;
-}
-
 .stats-partner-names {
   font-size: 1.15rem;
   line-height: 1.3;
