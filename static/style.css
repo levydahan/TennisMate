@@ -1405,18 +1405,15 @@ dialog:not([open]) {
 }
 
 .video-card {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto 16px;
+  padding: 10px;
   background: var(--card);
   color: var(--ink);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 14px 14px 12px;
-  margin: 0 auto 16px;
-  max-width: 360px;
-}
-
-.video-card .kicker {
-  margin: 0 0 8px;
-  color: var(--muted);
 }
 
 .video-frame {
