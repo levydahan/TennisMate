@@ -310,5 +310,82 @@ class AppHistoryTests(unittest.TestCase):
         self.assertEqual(hour2, [])
 
 
+class SeasonSimulationTests(unittest.TestCase):
+    """Many weeks through the app's own ensure_teams, storing and re-reading history."""
+
+    def setUp(self):
+        from app import app, db
+
+        self.app, self.db = app, db
+        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+        self.ctx = app.app_context()
+        self.ctx.push()
+        db.drop_all()
+        db.create_all()
+
+    def tearDown(self):
+        self.db.session.remove()
+        self.db.drop_all()
+        self.ctx.pop()
+
+    @staticmethod
+    def _pairs(teams):
+        return {tuple(sorted(p["name"] for p in t["players"])) for t in teams if len(t["players"]) == 2}
+
+    def _season(self, seed, weeks, use_history):
+        from datetime import date, timedelta
+
+        from app import GameSettings, ensure_teams
+        from players import FIXED_PLAYERS
+
+        # Fresh database per season: week dates and roster ids repeat across seasons.
+        self.db.drop_all()
+        self.db.create_all()
+        rng = random.Random(seed)
+        sessions = []
+        for w in range(weeks):
+            week_key = (date(2026, 1, 4) + timedelta(days=7 * w)).isoformat()
+            n = 5 if rng.random() < 0.25 else 6
+            attendees = rng.sample(FIXED_PLAYERS, n)
+            roster = [{"id": i + 1, "name": name} for i, name in enumerate(attendees)]
+            if use_history:
+                hour1, hour2 = ensure_teams("sunday", week_key, roster, True, True)
+            else:
+                hour1 = draw_teams(roster, random.Random(rng.random()))
+                hour2 = draw_rematch(roster, hour1, random.Random(rng.random()))
+            pairs1, pairs2 = self._pairs(hour1), self._pairs(hour2 or [])
+            self.assertEqual(sorted(p["name"] for t in hour1 for p in t["players"]), sorted(attendees))
+            if n == 6:
+                self.assertEqual((len(pairs1), len(pairs2)), (3, 3))
+                self.assertTrue(pairs1.isdisjoint(pairs2), (seed, w))
+            else:
+                self.assertEqual(sorted(len(t["players"]) for t in hour1), [1, 2, 2])
+                self.assertEqual(hour2, [])
+            sessions.append(pairs1 | pairs2)
+        repeats = [len(sessions[w] & (sessions[w - 1] | sessions[w - 2])) for w in range(2, weeks)]
+        return sum(repeats) / len(repeats)
+
+    def test_history_beats_random_over_a_season(self):
+        algo = [self._season(seed, 30, True) for seed in range(5)]
+        baseline = [self._season(seed, 30, False) for seed in range(5)]
+        self.assertLess(sum(algo) / 5, sum(baseline) / 5 / 3)
+
+    def test_stored_draw_is_stable_and_follows_roster_changes(self):
+        from app import ensure_teams
+        from players import FIXED_PLAYERS
+
+        roster = [{"id": i + 1, "name": n} for i, n in enumerate(FIXED_PLAYERS[:6])]
+        first = ensure_teams("sunday", "2026-03-01", roster, True, True)
+        self.assertEqual(first, ensure_teams("sunday", "2026-03-01", roster, True, True))
+        self.assertEqual(ensure_teams("sunday", "2026-03-01", roster, False, False), (None, None))
+
+        changed = roster[:5] + [{"id": 99, "name": FIXED_PLAYERS[7]}]
+        hour1, _ = ensure_teams("sunday", "2026-03-01", changed, True, True)
+        self.assertEqual(
+            sorted(p["name"] for t in hour1 for p in t["players"]),
+            sorted(p["name"] for p in changed),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
