@@ -1,6 +1,9 @@
 const gamesEl = document.getElementById("games");
 const pastGamesEl = document.getElementById("pastGames");
 const statsListsEl = document.getElementById("statsLists");
+// Expanded players on the stats screen. Lives in memory so refreshes keep them open,
+// and starts empty so the screen always opens fully minimized.
+const statsOpen = new Set();
 const homeViewEl = document.getElementById("homeView");
 const matchDayViewEl = document.getElementById("matchDayView");
 const appTabsEl = document.getElementById("appTabs");
@@ -465,6 +468,8 @@ function renderAdminDate(game) {
 }
 
 function renderGame(game) {
+  // The court-booker and teams sections only make sense once someone is enrolled.
+  const hasPlayers = (game.roster || []).length > 0;
   const statusClass = game.is_ended ? "ended" : game.is_open ? "open" : game.is_past ? "past" : "closed";
   const filled = (game.count / game.max_players) * 100;
   const emptySlots = Math.max(game.max_players - game.count, 0);
@@ -508,8 +513,8 @@ function renderGame(game) {
       <ul class="player-list">${rosterHtml}</ul>
       ${waitingHtml}
       ${renderJoin(game)}
-      ${renderFieldFold(game)}
-      ${renderTeamsFold(game)}
+      ${hasPlayers ? renderFieldFold(game) : ""}
+      ${hasPlayers ? renderTeamsFold(game) : ""}
       ${renderAdminDate(game)}
       ${state.is_admin && !game.is_ended ? `<div class="admin-tools"><button class="tiny-btn danger" data-clear="${game.slot}" type="button">ניקוי רשימה</button></div>` : ""}
     </article>
@@ -553,38 +558,89 @@ function renderStats() {
     ${emptyNote}
     <p class="stats-count">${stats.games || 0} משחקים שהסתיימו</p>
     <ul class="stats-list">
-      ${players.map((p) => {
-        const arrived = p.arrived || 0;
-        const missed = p.missed || 0;
-        const booked = p.booked || 0;
-        const notBooked = p.not_booked != null ? p.not_booked : Math.max((arrived + missed) - booked, 0);
-        return `
-        <li class="stats-player">
-          <span class="stats-name">${esc(p.name)}</span>
-          <div class="stats-graphs">
-            <div class="stats-metric">
-              <span class="stats-metric-label">הגעה</span>
-              ${stackedBar(arrived, missed, "bar-arrived", "bar-missed")}
-              <span class="stats-metric-nums">
-                <span class="arrived-n">${arrived} הגיע</span>
-                <span class="missed-n">${missed} לא</span>
-              </span>
-              <div class="sparkline" title="היסטוריית הגעה">${sparkDots(p.arrival_history, "on-arrived", "off-missed")}</div>
-            </div>
-            <div class="stats-metric">
-              <span class="stats-metric-label">הזמנת מגרש</span>
-              ${stackedBar(booked, notBooked, "bar-booked", "bar-idle")}
-              <span class="stats-metric-nums">
-                <span class="booked-n">${booked} הזמין</span>
-              </span>
-              <div class="sparkline" title="היסטוריית הזמנה">${sparkDots(p.booker_history, "on-booked", "off-idle")}</div>
-            </div>
-          </div>
-        </li>`;
-      }).join("")}
+      ${players.map((p, index) => renderStatsPlayer(p, index)).join("")}
     </ul>
     ${testBtn}
   `;
+}
+
+function hebrewTimes(n) {
+  return n === 1 ? "פעם אחת" : `${n} פעמים`;
+}
+
+function hebrewGames(n) {
+  return n === 1 ? "משחק אחד" : `${n} משחקים`;
+}
+
+// Top partner: who the player was drawn with most, how often, and how many
+// games they both played. With a tie every top partner is listed with its own games count.
+function statsPartnerHtml(partner) {
+  if (!partner || !partner.names || !partner.names.length) {
+    return `<span class="stats-partner-none">עדיין לא הוגרל עם אף אחד</span>`;
+  }
+  const together = partner.games_together || {};
+  const single = partner.names.length === 1;
+  const names = partner.names.map((name) => {
+    const games = together[name];
+    const extra = !single && games != null
+      ? ` <span class="stats-partner-games">(${hebrewGames(games)})</span>`
+      : "";
+    return `<strong>${esc(name)}</strong>${extra}`;
+  }).join(" · ");
+  const drawn = `הוגרלו יחד ${hebrewTimes(partner.times)}${single ? "" : " כל אחד"}`;
+  const games = single && together[partner.names[0]] != null
+    ? ` · שיחקו יחד ב־${hebrewGames(together[partner.names[0]])}`
+    : "";
+  return `
+    <span class="stats-partner-names">${names}</span>
+    <span class="stats-partner-times">${drawn}${games}</span>
+  `;
+}
+
+function renderStatsPlayer(p, index) {
+  const arrived = p.arrived || 0;
+  const missed = p.missed || 0;
+  const booked = p.booked || 0;
+  const notBooked = p.not_booked != null ? p.not_booked : Math.max((arrived + missed) - booked, 0);
+  const open = statsOpen.has(p.name);
+  const detailId = `stats-detail-${index}`;
+  return `
+    <li class="stats-player${open ? " open" : ""}" data-stats-name="${esc(p.name)}">
+      <button type="button" class="stats-name-link" data-stats-toggle aria-expanded="${open}" aria-controls="${detailId}">
+        <span class="stats-name-text">${esc(p.name)}</span>
+        <span class="stats-chevron" aria-hidden="true"></span>
+      </button>
+      <div class="stats-detail" id="${detailId}"${open ? "" : " hidden"}>
+        <div class="stats-tiles">
+          <div class="stats-tile tile-arrived">
+            <strong>${arrived}</strong>
+            <span>פעמים הגיע</span>
+          </div>
+          <div class="stats-tile tile-missed">
+            <strong>${missed}</strong>
+            <span>פעמים החמיץ</span>
+          </div>
+          <div class="stats-tile tile-booked">
+            <strong>${booked}</strong>
+            <span>הזמין מגרש</span>
+          </div>
+        </div>
+        <div class="stats-partner">
+          <span class="stats-partner-label">השותף המוביל</span>
+          <span class="stats-partner-value">${statsPartnerHtml(p.top_partner)}</span>
+        </div>
+        <div class="stats-metric">
+          <span class="stats-metric-label">הגעה</span>
+          ${stackedBar(arrived, missed, "bar-arrived", "bar-missed")}
+          <div class="sparkline" title="היסטוריית הגעה">${sparkDots(p.arrival_history, "on-arrived", "off-missed")}</div>
+        </div>
+        <div class="stats-metric">
+          <span class="stats-metric-label">הזמנת מגרש</span>
+          ${stackedBar(booked, notBooked, "bar-booked", "bar-idle")}
+          <div class="sparkline" title="היסטוריית הזמנה">${sparkDots(p.booker_history, "on-booked", "off-idle")}</div>
+        </div>
+      </div>
+    </li>`;
 }
 
 function upcomingGames() {
@@ -621,7 +677,13 @@ function defaultTabId() {
   return isActiveMatchDay() ? "match" : "home";
 }
 
+// "יום המשחק" is only reachable on a game day.
+function isTabAvailable(tab) {
+  return tab !== "match" || isActiveMatchDay();
+}
+
 function setTab(tab, { scroll = true } = {}) {
+  if (!isTabAvailable(tab)) tab = "home";
   currentTab = tab;
   document.querySelectorAll(".tab-panel").forEach((el) => {
     el.hidden = el.dataset.tab !== tab;
@@ -629,8 +691,11 @@ function setTab(tab, { scroll = true } = {}) {
   if (appTabsEl) {
     appTabsEl.querySelectorAll("[data-tab]").forEach((btn) => {
       const on = btn.dataset.tab === tab;
+      const available = isTabAvailable(btn.dataset.tab);
       btn.classList.toggle("active", on);
       btn.setAttribute("aria-selected", on ? "true" : "false");
+      btn.disabled = !available;
+      btn.title = available ? "" : "זמין רק ביום המשחק";
     });
   }
   try {
@@ -768,7 +833,10 @@ function renderHome() {
   const notifyOn = localStorage.getItem("tm-notify") === "1";
   let cta = "";
   if (enrolled) {
-    cta = `<button class="primary-btn" data-go-tab="match" type="button">למשחק של היום</button>`;
+    // The match-day tab only exists on game day; otherwise there is nowhere to go.
+    if (isActiveMatchDay()) {
+      cta = `<button class="primary-btn" data-go-tab="match" type="button">למשחק של היום</button>`;
+    }
   } else if (open) {
     cta = `<button class="primary-btn" data-go-tab="enroll" type="button">להרשמה למשחק</button>`;
   }
@@ -798,6 +866,10 @@ function renderHome() {
         <li><strong>${formatMoney(mine.paid_total)} ₪</strong><span>שולם על טניס</span></li>
         <li><strong>${mine.booked || 0}</strong><span>הזמנות מגרש</span></li>
       </ul>
+      <div class="stats-partner welcome-partner">
+        <span class="stats-partner-label">השותף המוביל</span>
+        <span class="stats-partner-value">${statsPartnerHtml(mine.top_partner)}</span>
+      </div>
       ${cta}
       <button id="notifyBtn" class="ghost-btn notify-btn" type="button">${
         notifyOn ? "תזכורות תשלום פעילות" : "הפעלת תזכורת תשלום"
@@ -873,6 +945,7 @@ function renderMatchDay() {
     ? `<h4 class="wait-title">רשימת המתנה</h4>
        <ul class="wait-list">${game.waiting.map((p, i) => renderPlayerRow(p, i, { waitlist: true, admin: state.is_admin })).join("")}</ul>`
     : "";
+  const hasPlayers = (game.roster || []).length > 0;
   matchDayViewEl.innerHTML = `
     <article class="game-card match-day-card" data-slot="${game.slot}" data-week-key="${esc(game.week_key || "")}">
       <p class="kicker">יום המשחק</p>
@@ -894,6 +967,7 @@ function renderMatchDay() {
         <ul class="player-list">${rosterHtml}</ul>
         ${waitingHtml}
       </div>
+      ${hasPlayers ? `
       <div class="match-day-block">
         <h4>מזמין המגרש</h4>
         <p class="share">${costSplit(game)}</p>
@@ -905,7 +979,7 @@ function renderMatchDay() {
       <div class="match-day-block">
         <h4>הגרלת זוגות</h4>
         ${renderTeams(game)}
-      </div>
+      </div>` : ""}
       ${renderAdminDate(game)}
     </article>
   `;
@@ -1167,6 +1241,20 @@ if (pastGamesEl) {
 }
 
 statsListsEl.addEventListener("click", async (e) => {
+  const toggle = e.target.closest("[data-stats-toggle]");
+  if (toggle) {
+    const item = toggle.closest(".stats-player");
+    if (!item) return;
+    const name = item.dataset.statsName;
+    const open = !statsOpen.has(name);
+    if (open) statsOpen.add(name);
+    else statsOpen.delete(name);
+    item.classList.toggle("open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+    const detail = item.querySelector(".stats-detail");
+    if (detail) detail.hidden = !open;
+    return;
+  }
   const payBtn = e.target.closest("[data-pay-reminder]");
   if (!payBtn) return;
   payBtn.disabled = true;

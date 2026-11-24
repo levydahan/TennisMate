@@ -310,6 +310,113 @@ class AppHistoryTests(unittest.TestCase):
         self.assertEqual(hour2, [])
 
 
+class StatsPartnerTests(unittest.TestCase):
+    """attendance_stats: arrived/missed counts and the most frequent teammate."""
+
+    def setUp(self):
+        from app import app, db
+
+        self.app, self.db = app, db
+        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+        self.ctx = app.app_context()
+        self.ctx.push()
+        db.drop_all()
+        db.create_all()
+
+    def tearDown(self):
+        self.db.session.remove()
+        self.db.drop_all()
+        self.ctx.pop()
+
+    def _game(self, week_key, roster, hour1, hour2=()):
+        from app import Enrollment, GameSettings
+        from players import normalize_name
+
+        def teams(pairs):
+            return json.dumps(
+                [{"label": "x", "players": [{"id": i, "name": n} for i, n in enumerate(pair)]} for pair in pairs],
+                ensure_ascii=False,
+            )
+
+        for name in roster:
+            self.db.session.add(
+                Enrollment(slot="sunday", week_key=week_key, name=name, name_key=normalize_name(name)[1])
+            )
+        self.db.session.add(
+            GameSettings(slot="sunday", week_key=week_key, teams_json=teams(hour1), teams2_json=teams(hour2))
+        )
+        self.db.session.commit()
+
+    def _player(self, stats, name):
+        return next(p for p in stats["players"] if p["name"] == name)
+
+    def test_top_partner_counts_both_hours_and_attendance(self):
+        from app import attendance_stats
+
+        six = ["אבירם", "רועי", "חן", "יגאל", "עידן", "לוי"]
+        self._game("2026-01-04", six, [("אבירם", "רועי"), ("חן", "יגאל"), ("עידן", "לוי")],
+                   [("אבירם", "חן"), ("רועי", "עידן"), ("יגאל", "לוי")])
+        self._game("2026-01-11", six, [("אבירם", "רועי"), ("חן", "עידן"), ("יגאל", "לוי")],
+                   [("אבירם", "יגאל"), ("רועי", "לוי"), ("חן", "עידן")])
+        # A third game that אבירם missed.
+        self._game("2026-01-18", [n for n in six if n != "אבירם"],
+                   [("רועי", "חן"), ("יגאל", "עידן")], [])
+
+        stats = attendance_stats()
+        self.assertEqual(stats["games"], 3)
+
+        aviram = self._player(stats, "אבירם")
+        self.assertEqual((aviram["arrived"], aviram["missed"]), (2, 1))
+        # אבירם played 2 games, both with רועי, and was drawn with him in each.
+        self.assertEqual(
+            aviram["top_partner"],
+            {"names": ["רועי"], "times": 2, "games_together": {"רועי": 2}},
+        )
+
+        # יגאל+לוי were drawn together twice and both attended all 3 games.
+        yigal = self._player(stats, "יגאל")
+        self.assertEqual(
+            yigal["top_partner"],
+            {"names": ["לוי"], "times": 2, "games_together": {"לוי": 3}},
+        )
+
+    def test_my_stats_carries_the_logged_in_players_top_partner(self):
+        from app import User, attendance_stats, my_stats
+
+        six = ["אבירם", "רועי", "חן", "יגאל", "עידן", "לוי"]
+        self._game("2026-01-04", six, [("אבירם", "רועי"), ("חן", "יגאל"), ("עידן", "לוי")])
+        self._game("2026-01-11", six, [("אבירם", "רועי"), ("חן", "עידן"), ("יגאל", "לוי")])
+        user = User(email="a@example.com", password_hash="x", name="אבירם")
+        self.db.session.add(user)
+        self.db.session.commit()
+
+        mine = my_stats(user, attendance_stats())
+        self.assertEqual(
+            mine["top_partner"], {"names": ["רועי"], "times": 2, "games_together": {"רועי": 2}}
+        )
+        # Works without passing stats too, and a user who never played has none.
+        self.assertEqual(my_stats(user)["top_partner"], mine["top_partner"])
+        other = User(email="b@example.com", password_hash="x", name="מושיקו")
+        self.db.session.add(other)
+        self.db.session.commit()
+        self.assertIsNone(my_stats(other)["top_partner"])
+
+    def test_ties_list_every_top_partner_and_unplayed_is_none(self):
+        from app import attendance_stats
+
+        six = ["אבירם", "רועי", "חן", "יגאל", "עידן", "לוי"]
+        self._game("2026-01-04", six, [("אבירם", "רועי"), ("חן", "יגאל"), ("עידן", "לוי")])
+        self._game("2026-01-11", six, [("אבירם", "חן"), ("רועי", "יגאל"), ("עידן", "לוי")])
+
+        stats = attendance_stats()
+        top = self._player(stats, "אבירם")["top_partner"]
+        self.assertEqual(top["times"], 1)
+        self.assertEqual(top["names"], sorted(["רועי", "חן"]))
+        self.assertEqual(top["games_together"], {"חן": 2, "רועי": 2})
+        # Someone who never attended a drawn game has no partner.
+        self.assertIsNone(self._player(stats, "שירן")["top_partner"])
+
+
 class SeasonSimulationTests(unittest.TestCase):
     """Many weeks through the app's own ensure_teams, storing and re-reading history."""
 

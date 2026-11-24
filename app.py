@@ -688,6 +688,24 @@ def known_stat_names() -> list[str]:
     return names
 
 
+def top_partner(counts: dict[str, int], together: dict[str, int] | None = None) -> dict | None:
+    """The teammate(s) a player was drawn with most often, or None if never drawn.
+
+    ``times`` is how often they were drawn as teammates; ``games_together`` is how
+    many finished games each top partner and the player both played in.
+    """
+    if not counts:
+        return None
+    best = max(counts.values())
+    names = sorted(name for name, times in counts.items() if times == best)
+    together = together or {}
+    return {
+        "names": names,
+        "times": best,
+        "games_together": {name: together.get(name, 0) for name in names},
+    }
+
+
 def attendance_stats() -> dict:
     """Arrival and court-booker history for finished games."""
     spark_max = 16
@@ -737,10 +755,26 @@ def attendance_stats() -> dict:
             ])
             if booker_name:
                 booker_name = canonical_player(booker_name) or booker_name
-            finished.append((week_key, slot, arrived_names, booker_name))
+            drawn_pairs = (
+                _team_name_pairs(settings.teams_json) + _team_name_pairs(settings.teams2_json)
+                if settings
+                else []
+            )
+            finished.append((week_key, slot, arrived_names, booker_name, drawn_pairs))
 
     finished.sort(key=lambda item: (item[0], item[1]))
-    for _week_key, _slot, arrived_names, booker_name in finished:
+    partner_counts: dict[str, dict[str, int]] = {name: {} for name in names}
+    together_counts: dict[str, dict[str, int]] = {name: {} for name in names}
+    for _week_key, _slot, arrived_names, booker_name, drawn_pairs in finished:
+        for first, second in drawn_pairs:
+            if first in partner_counts and second in partner_counts and first != second:
+                partner_counts[first][second] = partner_counts[first].get(second, 0) + 1
+                partner_counts[second][first] = partner_counts[second].get(first, 0) + 1
+        attended = [name for name in names if name in arrived_names]
+        for first in attended:
+            for second in attended:
+                if first != second:
+                    together_counts[first][second] = together_counts[first].get(second, 0) + 1
         for name in names:
             row = tallies[name]
             arrived = name in arrived_names
@@ -756,6 +790,9 @@ def attendance_stats() -> dict:
         row = tallies[name]
         total = row["arrived"] + row["missed"]
         row["not_booked"] = max(total - row["booked"], 0)
+        row["top_partner"] = top_partner(
+            partner_counts.get(row["name"], {}), together_counts.get(row["name"], {})
+        )
         if len(row["arrival_history"]) > spark_max:
             row["arrival_history"] = row["arrival_history"][-spark_max:]
             row["booker_history"] = row["booker_history"][-spark_max:]
@@ -763,11 +800,20 @@ def attendance_stats() -> dict:
     return {"games": len(finished), "players": players}
 
 
-def my_stats(me: User | None) -> dict | None:
-    """Personal attendance, payments, and court bookings for the logged-in player."""
+def my_stats(me: User | None, stats: dict | None = None) -> dict | None:
+    """Personal attendance, payments, and court bookings for the logged-in player.
+
+    ``stats`` is the result of ``attendance_stats()``; pass it in to avoid recomputing.
+    """
     if not me:
         return None
     my_name = canonical_player(me.name) or me.name
+    if stats is None:
+        stats = attendance_stats()
+    my_top_partner = next(
+        (row.get("top_partner") for row in stats.get("players", []) if row["name"] == my_name),
+        None,
+    )
     created = me.created_at
     if created and created.tzinfo is None:
         created = created.replace(tzinfo=timezone.utc)
@@ -830,6 +876,7 @@ def my_stats(me: User | None) -> dict | None:
         "missed": missed,
         "booked": booked,
         "paid_total": round(paid_total, 2),
+        "top_partner": my_top_partner,
     }
 
 
@@ -1163,6 +1210,7 @@ def public_state() -> dict:
     upcoming = next_game_at(date_overrides=overrides, time_overrides=times)
     target = banner_target(date_overrides=overrides, time_overrides=times)
     warning = pay_warning_text(debt)
+    stats = attendance_stats()
     return {
         "now": now_il().isoformat(),
         "is_admin": bool(session.get("is_admin")),
@@ -1174,8 +1222,8 @@ def public_state() -> dict:
         "past_games": ended_games,
         "players": FIXED_PLAYERS,
         "users": booker_users(),
-        "stats": attendance_stats(),
-        "my_stats": my_stats(me),
+        "stats": stats,
+        "my_stats": my_stats(me, stats),
         "enrollment_open": any(game.get("is_open") for game in upcoming_games),
         "vapid_public_key": vapid_public_key(),
         "pay_reminder_at": nxt.isoformat(),

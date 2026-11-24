@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=39" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=42" />
 </head>
 <body class="login-only">
   <div id="topBanners" class="top-banners">
@@ -98,7 +98,7 @@
       </section>
       <section class="tab-panel" id="tabStats" data-tab="stats" hidden>
         <h2 class="tab-heading">סטטיסטיקה כללית</h2>
-        <p class="muted">ליד כל שחקן: היסטוריית הגעה והיסטוריית הזמנת מגרש — לפי משחקים שהסתיימו.</p>
+        <p class="muted stats-intro">לחצו על שם שחקן כדי לראות כמה פעמים הגיע, כמה החמיץ ועם מי הוגרל הכי הרבה — לפי משחקים שהסתיימו.</p>
         <div id="statsLists"></div>
       </section>
     </div>
@@ -144,6 +144,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=41"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=44"></script>
 </body>
 </html>
