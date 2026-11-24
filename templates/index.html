@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=38" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=39" />
 </head>
 <body class="login-only">
   <div id="topBanners" class="top-banners">
@@ -72,6 +72,17 @@
     </section>
     <div id="appScreen" hidden>
       <section class="tab-panel" id="tabHome" data-tab="home">
+        <section class="video-card" aria-label="סרטון">
+          <p class="kicker">סרטון</p>
+          <div class="video-frame">
+            <iframe
+              src="https://www.youtube-nocookie.com/embed/Nleku8x8CfM"
+              title="YouTube video player"
+              loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen></iframe>
+          </div>
+        </section>
         <div id="homeView"></div>
       </section>
       <section class="tab-panel" id="tabEnroll" data-tab="enroll" hidden>
