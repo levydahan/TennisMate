@@ -827,53 +827,30 @@ function notifyPermission() {
 }
 
 function renderNotifyBlock() {
-  const user = state.user || {};
-  const on = Boolean(user.notify_on);
+  const on = Boolean(state.user && state.user.notify_on);
   const perm = notifyPermission();
-  const hourHe = state.hour_before_at_he || "";
-  const payHe = state.pay_reminder_at_he || "";
-  const courtHe = state.court_book_at_he || "";
-  const drawHe = state.draw_at_he || "";
-  const since = user.notify_since_he || "";
-  const devices = user.notify_devices || 0;
+  const approved = on && perm === "granted";
   const adminBtn = state.is_admin
     ? `<button class="tiny-btn" id="testPushBtn" type="button">בדיקת התראה</button>`
     : "";
-  if (!on) {
+  if (approved) {
+    return adminBtn ? `<div class="notify-card is-on">${adminBtn}</div>` : "";
+  }
+  if (on) {
     return `
       <div class="notify-card">
         <p class="notify-title">התראות</p>
-        <p class="notify-copy">הגרלה ב־12:00 ביום משחק, שעה לפני, חמישי 11:00 להזמנת מגרש, ואחרי המשחק תזכורת תשלום.</p>
-        <button id="notifyBtn" class="primary-btn notify-btn" type="button">הפעלת התראות</button>
+        <p class="notify-copy">במכשיר זה צריך לאשר שוב כדי לקבל תזכורות.</p>
+        <button id="notifyBtn" class="ghost-btn notify-btn" type="button">הפעלה במכשיר זה</button>
         ${adminBtn}
       </div>
     `;
   }
-  const approved = perm === "granted";
-  const deviceLine = approved
-    ? "במכשיר זה: מאושר"
-    : perm === "denied"
-      ? "במכשיר זה: חסום בהגדרות הדפדפן"
-      : perm === "unsupported"
-        ? "במכשיר זה: אין תמיכה בהתראות"
-        : "במכשיר זה: צריך לאשר";
-  const enableBtn = approved
-    ? ""
-    : `<button id="notifyBtn" class="ghost-btn notify-btn" type="button">הפעלה במכשיר זה</button>`;
   return `
-    <div class="notify-card is-on">
-      <p class="notify-title">התראות פעילות</p>
-      <ul class="notify-status">
-        <li>חשבון: ${esc(user.name)} · פעיל</li>
-        <li>${esc(deviceLine)}</li>
-        <li>מכשירים רשומים: ${devices}</li>
-        ${since ? `<li>הופעל: ${esc(since)}</li>` : ""}
-        <li>הבא · הגרלה: ${esc(drawHe || "12:00 ביום משחק")}</li>
-        <li>הבא · שעה לפני: ${esc(hourHe || "כשיהיה משחק")}</li>
-        <li>הבא · הזמנת מגרש: ${esc(courtHe || "חמישי 11:00")}</li>
-        <li>הבא · תשלום: ${esc(payHe || "אחרי המשחק")}</li>
-      </ul>
-      ${enableBtn}
+    <div class="notify-card">
+      <p class="notify-title">התראות</p>
+      <p class="notify-copy">הגרלה ב־12:00 ביום משחק, שעה לפני, חמישי 11:00 להזמנת מגרש, ואחרי המשחק תזכורת תשלום.</p>
+      <button id="notifyBtn" class="primary-btn notify-btn" type="button">הפעלת התראות</button>
       ${adminBtn}
     </div>
   `;
