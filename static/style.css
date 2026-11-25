@@ -77,7 +77,7 @@ button, a, input, select, textarea {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: auto;
   touch-action: pan-y;
-  padding: calc(16px + var(--safe-top)) max(16px, var(--safe-right)) calc(148px + var(--safe-bottom)) max(16px, var(--safe-left));
+  padding: calc(8px + var(--safe-top)) max(16px, var(--safe-right)) calc(148px + var(--safe-bottom)) max(16px, var(--safe-left));
 }
 
 .top-banners {
@@ -170,18 +170,15 @@ main, #appScreen, .tab-panel {
   align-items: center;
   justify-content: center;
   position: relative;
-  gap: 12px;
-  margin-bottom: 18px;
+  gap: 8px;
+  min-height: 44px;
+  margin-bottom: 10px;
   text-align: center;
-}
-
-body.login-only .topbar {
-  flex-direction: column;
 }
 
 .brand {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -192,19 +189,11 @@ body.login-only .topbar {
   text-align: center;
 }
 
-body.login-only .topbar-end {
-  position: static;
-  justify-content: center;
-  width: 100%;
-}
-
-body:not(.login-only) .topbar-end {
+.topbar-end {
   position: absolute;
   inset-inline-end: 0;
-  top: 0;
-}
-
-.topbar-end {
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -340,8 +329,8 @@ body:not(.login-only) .topbar-end {
   text-align: start;
 }
 
-.brand h1 { margin: 0; font-size: 1.7rem; line-height: 1.1; }
-.brand p { margin: 2px 0 0; color: #bbf7d0; font-size: 0.92rem; }
+.brand h1 { margin: 0; font-size: 1.25rem; line-height: 1.1; }
+.brand p { margin: 0; color: #bbf7d0; font-size: 0.92rem; }
 body.login-only .brand p { display: none; }
 .brand-mark {
   display: flex;
@@ -353,19 +342,25 @@ body.login-only .brand p { display: none; }
 }
 
 .brand-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   object-fit: cover;
-  filter: drop-shadow(0 4px 8px rgba(0,0,0,.25));
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,.25));
   flex: none;
   pointer-events: none;
   user-select: none;
   -webkit-user-drag: none;
 }
 
+.topbar-end .ghost-btn {
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+
 .page.login-only {
-  padding-top: calc(24px + var(--safe-top));
+  padding-top: calc(8px + var(--safe-top));
 }
 
 .page.has-unpaid-banner {
