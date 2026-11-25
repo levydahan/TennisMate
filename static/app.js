@@ -857,14 +857,17 @@ function renderNotifyBlock() {
 }
 
 function renderInstallBlock() {
-  if (isStandaloneApp() || !canOfferInstall()) return "";
+  if (isStandaloneApp()) return "";
+  const note = installHelpText
+    ? `<p id="homeInstallNote" class="install-note">${esc(installHelpText)}</p>`
+    : `<p id="homeInstallNote" class="install-note" hidden></p>`;
   return `
     <div class="install-card">
       <button type="button" class="ghost-btn install-btn" id="homeInstallBtn">
         <img class="install-btn-icon" src="/static/racket-icon.png" alt="" />
         הוספה למסך הבית
       </button>
-      <p id="homeInstallNote" class="install-note" hidden></p>
+      ${note}
     </div>
   `;
 }
@@ -927,10 +930,6 @@ function renderHome() {
   if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
   const testPushBtn = document.getElementById("testPushBtn");
   if (testPushBtn) testPushBtn.addEventListener("click", testPush);
-  bindInstallButton(
-    document.getElementById("homeInstallBtn"),
-    document.getElementById("homeInstallNote")
-  );
   const avatarInput = document.getElementById("avatarInput");
   if (avatarInput) avatarInput.addEventListener("change", onAvatarPicked);
 }
@@ -1697,10 +1696,30 @@ function isPhoneLike() {
 }
 
 let deferredInstallPrompt = null;
+let installHelpText = "";
 
 function canOfferInstall() {
-  if (isStandaloneApp()) return false;
-  return isPhoneLike() || Boolean(deferredInstallPrompt);
+  return !isStandaloneApp();
+}
+
+function installHelpMessage() {
+  const ua = navigator.userAgent || "";
+  if (/iphone|ipad|ipod/i.test(ua)) {
+    return "בספארי לחצו על שיתוף (הריבוע עם החץ למעלה) ואז על הוספה למסך הבית.";
+  }
+  if (/samsungbrowser/i.test(ua)) {
+    return "בתפריט (⋮) לחצו על הוספה למסך הבית.";
+  }
+  return "בתפריט הדפדפן (⋮) בחרו הוספה למסך הבית או התקנת אפליקציה.";
+}
+
+function showInstallHelp(note) {
+  installHelpText = installHelpMessage();
+  if (note) {
+    note.hidden = false;
+    note.textContent = installHelpText;
+  }
+  showToast(installHelpText);
 }
 
 function setInstallButtonsHidden(hidden) {
@@ -1708,6 +1727,7 @@ function setInstallButtonsHidden(hidden) {
     btn.hidden = hidden;
   });
   if (hidden) {
+    installHelpText = "";
     document.querySelectorAll("#installAppNote, #homeInstallNote").forEach((note) => {
       note.hidden = true;
     });
@@ -1715,32 +1735,35 @@ function setInstallButtonsHidden(hidden) {
 }
 
 async function promptInstallApp(note) {
-  if (deferredInstallPrompt) {
-    deferredInstallPrompt.prompt();
+  const promptEvent = deferredInstallPrompt;
+  if (promptEvent && typeof promptEvent.prompt === "function") {
     try {
-      await deferredInstallPrompt.userChoice;
-    } catch (err) {}
-    deferredInstallPrompt = null;
-    setInstallButtonsHidden(true);
-    return;
+      await promptEvent.prompt();
+      const choice = await promptEvent.userChoice;
+      deferredInstallPrompt = null;
+      if (choice && choice.outcome === "accepted") {
+        setInstallButtonsHidden(true);
+        showToast("נוסף למסך הבית");
+        return;
+      }
+    } catch (err) {
+      deferredInstallPrompt = null;
+    }
   }
-  if (note) {
-    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
-    note.hidden = false;
-    note.textContent = ios
-      ? "בספארי לחצו על שיתוף (הריבוע עם החץ למעלה) ואז על הוספה למסך הבית."
-      : "בתפריט הדפדפן (⋮) בחרו הוספה למסך הבית או התקנת אפליקציה.";
-  }
+  showInstallHelp(note);
 }
 
 function bindInstallButton(btn, note) {
   if (!btn) return;
-  if (!canOfferInstall()) {
+  if (isStandaloneApp()) {
     btn.hidden = true;
     return;
   }
   btn.hidden = false;
-  btn.addEventListener("click", () => promptInstallApp(note));
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    promptInstallApp(note);
+  });
 }
 
 function initInstallApp() {
@@ -1756,7 +1779,11 @@ function initInstallApp() {
   window.addEventListener("appinstalled", () => {
     deferredInstallPrompt = null;
     setInstallButtonsHidden(true);
+    showToast("נוסף למסך הבית");
   });
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+  }
   bindInstallButton(
     document.getElementById("installAppBtn"),
     document.getElementById("installAppNote")
@@ -1770,6 +1797,12 @@ const payWarnBtn = document.getElementById("payWarn");
 if (payWarnBtn) payWarnBtn.addEventListener("click", scrollToUnpaidGame);
 if (homeViewEl) {
   homeViewEl.addEventListener("click", (e) => {
+    const install = e.target.closest("#homeInstallBtn");
+    if (install) {
+      e.preventDefault();
+      promptInstallApp(document.getElementById("homeInstallNote"));
+      return;
+    }
     const go = e.target.closest("[data-go-tab]");
     if (go) setTab(go.dataset.goTab);
   });
@@ -1780,7 +1813,7 @@ if (matchDayViewEl) {
   matchDayViewEl.addEventListener("submit", onBookerCustomSubmit);
 }
 
-if ("serviceWorker" in navigator) {
+if ("serviceWorker" in navigator && isStandaloneApp()) {
   navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
 }
 if (localStorage.getItem("tm-notify") === "1" && "Notification" in window && Notification.permission === "granted") {
