@@ -93,7 +93,7 @@ function lazuzBookLink(game) {
 function renderGameHead(game, statusClass) {
   const waze = wazeButton(game);
   const lazuz = lazuzBookLink(game);
-  const hasVenue = Boolean(game.location || waze);
+  const actions = waze || lazuz;
   return `
     <div class="game-head">
       <div class="game-head-copy">
@@ -102,16 +102,12 @@ function renderGameHead(game, statusClass) {
       </div>
       <div class="game-status-col">
         <span class="status ${statusClass}">${esc(game.status_he)}</span>
-        ${hasVenue ? "" : lazuz}
       </div>
     </div>
-    ${hasVenue ? `
+    ${game.location || actions ? `
     <div class="game-place">
       ${game.location ? `<p class="place-name">${esc(game.location)}</p>` : ""}
-      <div class="game-place-actions">
-        ${waze}
-        ${lazuz}
-      </div>
+      ${actions ? `<div class="game-place-actions">${waze}${lazuz}</div>` : ""}
     </div>` : ""}
   `;
 }

@@ -1516,33 +1516,36 @@ select[data-booker] {
 
 .game-place {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 8px 10px;
+  justify-content: center;
+  gap: 8px;
   margin: 10px 0 12px;
   padding: 10px 12px;
   background: #ecfdf3;
   border: 1px solid #bbf7d0;
   border-radius: 16px;
+  text-align: center;
 }
 
 .place-name {
   margin: 0;
   min-width: 0;
-  flex: 1 1 10rem;
+  width: 100%;
   font-weight: 700;
   color: #14532d;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .game-place-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-inline-start: auto;
+  justify-content: center;
+  gap: 8px;
 }
 
 .waze-btn {
