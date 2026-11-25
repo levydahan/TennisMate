@@ -1702,24 +1702,71 @@ function canOfferInstall() {
   return !isStandaloneApp();
 }
 
-function installHelpMessage() {
+function installHelpContent() {
   const ua = navigator.userAgent || "";
   if (/iphone|ipad|ipod/i.test(ua)) {
-    return "בספארי לחצו על שיתוף (הריבוע עם החץ למעלה) ואז על הוספה למסך הבית.";
+    return {
+      lead: "באייפון אי אפשר להתקין מכפתור — רק מתפריט השיתוף של ספארי:",
+      steps: [
+        "פתחו את האתר בספארי (לא מתוך אינסטגרם/וואטסאפ).",
+        "לחצו על שיתוף — הריבוע עם החץ למעלה.",
+        "גללו ובחרו הוספה למסך הבית, ואז הוסף.",
+      ],
+    };
   }
   if (/samsungbrowser/i.test(ua)) {
-    return "בתפריט (⋮) לחצו על הוספה למסך הבית.";
+    return {
+      lead: "בסמסונג לחצו על הכפתור כאן, ואז אשרו בתפריט:",
+      steps: [
+        "לחצו על התפריט ⋮ למעלה.",
+        "בחרו הוספת דף אל ואז מסך הבית.",
+        "אשרו הוספה.",
+      ],
+    };
   }
-  return "בתפריט הדפדפן (⋮) בחרו הוספה למסך הבית או התקנת אפליקציה.";
+  if (/android/i.test(ua)) {
+    return {
+      lead: "בכרום לחצו על התפריט והתקינו את האפליקציה:",
+      steps: [
+        "לחצו על התפריט ⋮ בפינה.",
+        "בחרו התקנת אפליקציה או הוספה למסך הבית.",
+        "אשרו התקן.",
+      ],
+    };
+  }
+  return {
+    lead: "אפשר להוסיף את טניסמייט למסך הבית מתפריט הדפדפן:",
+    steps: [
+      "לחצו על התפריט ⋮ או על סמל ההתקנה בשורת הכתובת.",
+      "בחרו הוספה למסך הבית או התקנת אפליקציה.",
+      "אשרו את ההתקנה.",
+    ],
+  };
 }
 
 function showInstallHelp(note) {
-  installHelpText = installHelpMessage();
+  const info = installHelpContent();
+  installHelpText = info.lead;
   if (note) {
     note.hidden = false;
-    note.textContent = installHelpText;
+    note.textContent = info.lead;
   }
-  showToast(installHelpText);
+  const dialog = document.getElementById("installDialog");
+  const lead = document.getElementById("installDialogLead");
+  const list = document.getElementById("installDialogSteps");
+  if (lead) lead.textContent = info.lead;
+  if (list) {
+    list.innerHTML = info.steps.map((step) => `<li>${esc(step)}</li>`).join("");
+  }
+  if (dialog && typeof dialog.showModal === "function") {
+    try {
+      if (!dialog.open) dialog.showModal();
+      return;
+    } catch (_err) {
+      /* fall through to toast */
+    }
+  }
+  showToast(info.lead);
 }
 
 function setInstallButtonsHidden(hidden) {

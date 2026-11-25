@@ -9,12 +9,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>טניסמייט · ניהול משחקים</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='racket-icon.png') }}" />
-  <link rel="apple-touch-icon" href="{{ url_for('static', filename='racket-icon.png') }}" />
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='racket-icon-180.png') }}" />
+  <meta name="apple-mobile-web-app-title" content="טניסמייט" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=53" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=54" />
 </head>
 <body class="login-only">
   <div id="topBanners" class="top-banners">
@@ -136,6 +137,17 @@
 
   <div id="toast" class="toast" hidden></div>
 
+  <dialog id="installDialog" class="dialog install-dialog">
+    <form method="dialog">
+      <h3>הוספה למסך הבית</h3>
+      <p id="installDialogLead" class="install-dialog-lead"></p>
+      <ol id="installDialogSteps" class="install-steps"></ol>
+      <div class="dialog-actions">
+        <button type="submit" class="primary-btn" value="ok">הבנתי</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="adminDialog" class="dialog">
     <form id="adminForm" method="dialog">
       <h3>כניסת מנהל</h3>
@@ -148,6 +160,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=57"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=58"></script>
 </body>
 </html>

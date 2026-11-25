@@ -2035,7 +2035,10 @@ def service_worker():
 
 @app.get("/manifest.webmanifest")
 def web_manifest():
-    return send_from_directory(app.static_folder, "manifest.webmanifest")
+    response = send_from_directory(app.static_folder, "manifest.webmanifest")
+    response.headers["Content-Type"] = "application/manifest+json; charset=utf-8"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.post("/api/push/subscribe")
