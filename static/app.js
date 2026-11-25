@@ -821,6 +821,57 @@ function matchDayGame() {
   return today || nextUpcomingGame();
 }
 
+function notifyPermission() {
+  if (!("Notification" in window)) return "unsupported";
+  return Notification.permission;
+}
+
+function renderNotifyBlock() {
+  const user = state.user || {};
+  const on = Boolean(user.notify_on);
+  const perm = notifyPermission();
+  const hourHe = state.hour_before_at_he || "";
+  const payHe = state.pay_reminder_at_he || "";
+  const since = user.notify_since_he || "";
+  const devices = user.notify_devices || 0;
+  const adminBtn = state.is_admin
+    ? `<button class="tiny-btn" id="testPushBtn" type="button">בדיקת התראה</button>`
+    : "";
+  if (!on) {
+    return `
+      <div class="notify-card">
+        <p class="notify-title">התראות</p>
+        <p class="notify-copy">שעה לפני המשחק, ואחרי המשחק תזכורת תשלום — רק לחשבון שלך.</p>
+        <button id="notifyBtn" class="primary-btn notify-btn" type="button">הפעלת התראות</button>
+        ${adminBtn}
+      </div>
+    `;
+  }
+  const deviceLine = perm === "granted"
+    ? "במכשיר זה: מאושר"
+    : perm === "denied"
+      ? "במכשיר זה: חסום בהגדרות הדפדפן"
+      : perm === "unsupported"
+        ? "במכשיר זה: אין תמיכה בהתראות"
+        : "במכשיר זה: צריך לאשר";
+  const retryLabel = perm === "granted" ? "רענון במכשיר זה" : "הפעלה במכשיר זה";
+  return `
+    <div class="notify-card is-on">
+      <p class="notify-title">התראות פעילות</p>
+      <ul class="notify-status">
+        <li>חשבון: ${esc(user.name)} · פעיל</li>
+        <li>${esc(deviceLine)}</li>
+        <li>מכשירים רשומים: ${devices}</li>
+        ${since ? `<li>הופעל: ${esc(since)}</li>` : ""}
+        <li>הבא · שעה לפני: ${esc(hourHe || "כשיהיה משחק")}</li>
+        <li>הבא · תשלום: ${esc(payHe || "אחרי המשחק")}</li>
+      </ul>
+      <button id="notifyBtn" class="ghost-btn notify-btn" type="button">${retryLabel}</button>
+      ${adminBtn}
+    </div>
+  `;
+}
+
 function renderHome() {
   if (!homeViewEl) return;
   const name = state.user ? state.user.name : "";
@@ -828,7 +879,6 @@ function renderHome() {
   const game = matchDayGame() || nextUpcomingGame();
   const enrolled = Boolean(myEnrollment(game));
   const open = enrollmentIsOpen();
-  const notifyOn = localStorage.getItem("tm-notify") === "1";
   let cta = "";
   if (enrolled) {
     // The match-day tab only exists on game day; otherwise there is nowhere to go.
@@ -869,13 +919,13 @@ function renderHome() {
         <span class="stats-partner-value">${statsPartnerHtml(mine.top_partner)}</span>
       </div>
       ${cta}
-      <button id="notifyBtn" class="ghost-btn notify-btn" type="button">${
-        notifyOn ? "תזכורות תשלום פעילות" : "הפעלת תזכורת תשלום"
-      }</button>
+      ${renderNotifyBlock()}
     </section>
   `;
   const notifyBtn = document.getElementById("notifyBtn");
   if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
+  const testPushBtn = document.getElementById("testPushBtn");
+  if (testPushBtn) testPushBtn.addEventListener("click", testPush);
   const avatarInput = document.getElementById("avatarInput");
   if (avatarInput) avatarInput.addEventListener("change", onAvatarPicked);
 }
@@ -1285,13 +1335,18 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 async function registerPush() {
+  if (!state.user) {
+    showToast("יש להתחבר כדי להפעיל התראות");
+    return;
+  }
   if (!("serviceWorker" in navigator) || !("Notification" in window)) {
     showToast("הדפדפן לא תומך בהתראות");
     return;
   }
   const permission = await Notification.requestPermission();
   if (permission !== "granted") {
-    showToast("צריך לאשר התראות כדי לקבל תזכורת תשלום");
+    showToast("צריך לאשר התראות בהגדרות הדפדפן");
+    render();
     return;
   }
   const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
@@ -1303,14 +1358,35 @@ async function registerPush() {
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(state.vapid_public_key),
       });
-      await api("/api/push/subscribe", { subscription: sub.toJSON() });
+      const data = await api("/api/push/subscribe", { subscription: sub.toJSON() });
+      applyState(data);
+      if (!data.ok) return;
     } catch (err) {
       console.warn("push subscribe failed", err);
+      showToast("ההרשמה להתראות נכשלה");
+      return;
     }
+  } else {
+    showToast("השרת עדיין לא מוכן להתראות");
+    return;
   }
   scheduleLocalReminders(registration);
-  render();
-  showToast("התראות הופעלו: שעה לפני המשחק, ואחרי המשחק תזכורת תשלום.");
+}
+
+async function testPush() {
+  const btn = document.getElementById("testPushBtn");
+  if (btn) btn.disabled = true;
+  const data = await api("/api/admin/test-push", {});
+  applyState(data);
+  if (!data.pushed && "Notification" in window && Notification.permission === "granted") {
+    new Notification(data.title || "בדיקת התראה · טניסמייט", {
+      body: data.body || "אם אתה רואה את זה, ההתראות עובדות.",
+      dir: "rtl",
+      lang: "he",
+      tag: "tennismate-test",
+    });
+  }
+  if (btn) btn.disabled = false;
 }
 
 function showLocalNote(registration, title, body, tag) {

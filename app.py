@@ -164,6 +164,7 @@ class PushSubscription(db.Model):
     __tablename__ = "push_subscriptions"
 
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=True, index=True)
     endpoint = db.Column(db.Text, nullable=False, unique=True)
     p256dh = db.Column(db.String(200), nullable=False)
     auth = db.Column(db.String(200), nullable=False)
@@ -266,6 +267,11 @@ def _ensure_schema():
         if "avatar" not in columns:
             with db.engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN avatar TEXT"))
+    if "push_subscriptions" in inspector.get_table_names():
+        columns = {col["name"] for col in inspector.get_columns("push_subscriptions")}
+        if "user_id" not in columns:
+            with db.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE push_subscriptions ADD COLUMN user_id INTEGER"))
 
 
 # Do not block gunicorn import on Postgres. Render marks the deploy failed if
@@ -310,10 +316,38 @@ def current_user() -> User | None:
     return db.session.get(User, uid)
 
 
+def user_notify_status(user: User | None) -> dict:
+    if not user:
+        return {
+            "notify_on": False,
+            "notify_devices": 0,
+            "notify_since": None,
+            "notify_since_he": None,
+        }
+    rows = (
+        PushSubscription.query.filter_by(user_id=user.id)
+        .order_by(PushSubscription.created_at.asc(), PushSubscription.id.asc())
+        .all()
+    )
+    first = rows[0] if rows else None
+    since = first.created_at if first else None
+    if since and since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    since_il = since.astimezone(TZ) if since else None
+    return {
+        "notify_on": bool(rows),
+        "notify_devices": len(rows),
+        "notify_since": since.isoformat() if since else None,
+        "notify_since_he": format_dt_he(since_il) if since_il else None,
+    }
+
+
 def serialize_user(user: User | None) -> dict | None:
     if not user:
         return None
-    return {"id": user.id, "email": user.email, "name": user.name, "avatar": user.avatar}
+    payload = {"id": user.id, "email": user.email, "name": user.name, "avatar": user.avatar}
+    payload.update(user_notify_status(user))
+    return payload
 
 
 def booker_users() -> list[dict]:
@@ -1076,7 +1110,7 @@ def _cron_authorized() -> bool:
     return hmac.compare_digest(provided, expected)
 
 
-def dispatch_web_push(message: dict) -> int:
+def dispatch_web_push(message: dict, user_id: int | None = None) -> int:
     public, private = _ensure_vapid_keys()
     if not public or not private:
         app.logger.warning("Web push skipped: VAPID keys are not available")
@@ -1087,7 +1121,10 @@ def dispatch_web_push(message: dict) -> int:
         app.logger.warning("Web push skipped: pywebpush is not installed")
         return 0
     sent = 0
-    for row in PushSubscription.query.all():
+    query = PushSubscription.query
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
+    for row in query.all():
         try:
             webpush(
                 subscription_info={
@@ -1888,6 +1925,9 @@ def web_manifest():
 
 @app.post("/api/push/subscribe")
 def push_subscribe():
+    user = current_user()
+    if not user:
+        return jsonify({"ok": False, "message": "יש להתחבר כדי להפעיל התראות"}), 401
     data = request.get_json(silent=True) or {}
     sub = data.get("subscription") or data
     endpoint = (sub.get("endpoint") or "").strip()
@@ -1900,10 +1940,57 @@ def push_subscribe():
     if row:
         row.p256dh = p256dh
         row.auth = auth
+        row.user_id = user.id
     else:
-        db.session.add(PushSubscription(endpoint=endpoint, p256dh=p256dh, auth=auth))
+        db.session.add(PushSubscription(
+            user_id=user.id,
+            endpoint=endpoint,
+            p256dh=p256dh,
+            auth=auth,
+        ))
     db.session.commit()
-    return jsonify({"ok": True, "message": "תזכורות התשלום הופעלו"})
+    payload = public_state()
+    payload.update({"ok": True, "message": "התראות הופעלו לחשבון שלך"})
+    return jsonify(payload)
+
+
+@app.post("/api/admin/test-push")
+@admin_required
+def admin_test_push():
+    user = current_user()
+    message = {
+        "title": "בדיקת התראה · טניסמייט",
+        "body": "אם אתה רואה את זה, ההתראות עובדות.",
+        "tag": "tennismate-test",
+    }
+    payload = public_state()
+    if not user:
+        payload.update({
+            "ok": False,
+            "pushed": 0,
+            "title": message["title"],
+            "body": message["body"],
+            "message": "יש להתחבר כשחקן ואז לבדוק התראה",
+        })
+        return jsonify(payload)
+    sent = dispatch_web_push(message, user_id=user.id)
+    if sent:
+        payload.update({
+            "ok": True,
+            "pushed": sent,
+            "title": message["title"],
+            "body": message["body"],
+            "message": "נשלחה התראת בדיקה אליך",
+        })
+    else:
+        payload.update({
+            "ok": False,
+            "pushed": 0,
+            "title": message["title"],
+            "body": message["body"],
+            "message": "אין מכשיר רשום. הפעילו התראות במסך הראשי ואז בדקו שוב.",
+        })
+    return jsonify(payload)
 
 
 def _cron_force() -> bool:
