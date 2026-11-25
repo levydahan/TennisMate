@@ -9,13 +9,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>טניסמייט · ניהול משחקים</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='racket-icon.png') }}" />
-  <link rel="apple-touch-icon" href="{{ url_for('static', filename='racket-icon-180.png') }}" />
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='racket-icon-180.png') }}" />
   <meta name="apple-mobile-web-app-title" content="טניסמייט" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=56" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=57" />
 </head>
 <body class="login-only">
   <div id="topBanners" class="top-banners">
@@ -135,6 +135,15 @@
 
   <div id="toast" class="toast" hidden></div>
 
+  <div id="installSheet" class="install-sheet" hidden>
+    <div class="install-sheet-card" role="dialog" aria-modal="true" aria-labelledby="installSheetTitle">
+      <h3 id="installSheetTitle">הוספה למסך הבית</h3>
+      <p id="installSheetLead" class="install-dialog-lead"></p>
+      <ol id="installSheetSteps" class="install-steps"></ol>
+      <button type="button" class="primary-btn" id="installSheetClose">הבנתי</button>
+    </div>
+  </div>
+
   <dialog id="installDialog" class="dialog install-dialog">
     <form method="dialog">
       <h3>הוספה למסך הבית</h3>
@@ -158,6 +167,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=60"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=61"></script>
 </body>
 </html>

@@ -857,13 +857,19 @@ function renderNotifyBlock() {
 }
 
 function renderInstallBlock() {
+  const info = installHelpContent();
+  const ios = isIOSDevice();
   const note = installHelpText
     ? `<p id="homeInstallNote" class="install-note">${esc(installHelpText)}</p>`
     : `<p id="homeInstallNote" class="install-note" hidden></p>`;
+  const steps = ios
+    ? `<ol class="install-steps">${info.steps.map((step) => `<li>${esc(step)}</li>`).join("")}</ol>`
+    : "";
   return `
     <div class="install-card">
       <p class="notify-title">מסך הבית</p>
-      <p class="notify-copy">כדי לפתוח את טניסמייט כמו אפליקציה, הוסיפו קיצור למסך הבית.</p>
+      <p class="notify-copy">${esc(ios ? info.lead : "כדי לפתוח את טניסמייט כמו אפליקציה, הוסיפו קיצור למסך הבית.")}</p>
+      ${steps}
       <button type="button" class="primary-btn install-btn" id="homeInstallBtn">
         <img class="install-btn-icon" src="/static/racket-icon-192.png" alt="" />
         הוספה למסך הבית
@@ -1693,6 +1699,16 @@ function isStandaloneApp() {
     || window.matchMedia("(display-mode: standalone)").matches;
 }
 
+function isIOSDevice() {
+  const ua = navigator.userAgent || "";
+  if (/iphone|ipad|ipod/i.test(ua)) return true;
+  return /macintosh/i.test(ua) && Number(navigator.maxTouchPoints || 0) > 1;
+}
+
+function isIOSInAppBrowser() {
+  return /FBAN|FBAV|Instagram|Line\/|WhatsApp|Twitter|Snapchat|GSA\//i.test(navigator.userAgent || "");
+}
+
 function isPhoneLike() {
   return window.matchMedia("(pointer: coarse)").matches
     || /android|iphone|ipad|ipod/i.test(navigator.userAgent || "");
@@ -1707,13 +1723,23 @@ function canOfferInstall() {
 
 function installHelpContent() {
   const ua = navigator.userAgent || "";
-  if (/iphone|ipad|ipod/i.test(ua)) {
+  if (isIOSDevice()) {
+    if (isIOSInAppBrowser()) {
+      return {
+        lead: "באייפון צריך לפתוח את טניסמייט בספארי כדי להוסיף למסך הבית:",
+        steps: [
+          "לחצו על ⋯ או על פתיחה בספארי.",
+          "בספארי לחצו על שיתוף — הריבוע עם החץ למעלה בתחתית המסך.",
+          "גללו לבחירת הוספה למסך הבית, ואז הוסף.",
+        ],
+      };
+    }
     return {
-      lead: "באייפון אי אפשר להתקין מכפתור — רק מתפריט השיתוף של ספארי:",
+      lead: "באייפון מוסיפים למסך הבית מתפריט השיתוף של ספארי:",
       steps: [
-        "פתחו את האתר בספארי (לא מתוך אינסטגרם/וואטסאפ).",
-        "לחצו על שיתוף — הריבוע עם החץ למעלה.",
-        "גללו ובחרו הוספה למסך הבית, ואז הוסף.",
+        "לחצו על שיתוף בתחתית המסך — הריבוע עם החץ למעלה.",
+        "גללו ובחרו הוספה למסך הבית.",
+        "לחצו הוסף בפינה למעלה.",
       ],
     };
   }
@@ -1747,6 +1773,13 @@ function installHelpContent() {
   };
 }
 
+function fillInstallSteps(leadEl, listEl, info) {
+  if (leadEl) leadEl.textContent = info.lead;
+  if (listEl) {
+    listEl.innerHTML = info.steps.map((step) => `<li>${esc(step)}</li>`).join("");
+  }
+}
+
 function showInstallHelp(note) {
   const info = installHelpContent();
   installHelpText = info.lead;
@@ -1754,13 +1787,22 @@ function showInstallHelp(note) {
     note.hidden = false;
     note.textContent = info.lead;
   }
-  const dialog = document.getElementById("installDialog");
-  const lead = document.getElementById("installDialogLead");
-  const list = document.getElementById("installDialogSteps");
-  if (lead) lead.textContent = info.lead;
-  if (list) {
-    list.innerHTML = info.steps.map((step) => `<li>${esc(step)}</li>`).join("");
+  fillInstallSteps(
+    document.getElementById("installSheetLead"),
+    document.getElementById("installSheetSteps"),
+    info
+  );
+  fillInstallSteps(
+    document.getElementById("installDialogLead"),
+    document.getElementById("installDialogSteps"),
+    info
+  );
+  const sheet = document.getElementById("installSheet");
+  if (sheet) {
+    sheet.hidden = false;
+    return;
   }
+  const dialog = document.getElementById("installDialog");
   if (dialog && typeof dialog.showModal === "function") {
     try {
       if (!dialog.open) dialog.showModal();
@@ -1786,7 +1828,7 @@ function setInstallButtonsHidden(hidden) {
 
 async function promptInstallApp(note) {
   const promptEvent = deferredInstallPrompt;
-  if (promptEvent && typeof promptEvent.prompt === "function") {
+  if (!isIOSDevice() && promptEvent && typeof promptEvent.prompt === "function") {
     try {
       await promptEvent.prompt();
       const choice = await promptEvent.userChoice;
@@ -1816,6 +1858,18 @@ function initInstallApp() {
   });
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+  }
+  const sheet = document.getElementById("installSheet");
+  const closeBtn = document.getElementById("installSheetClose");
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      if (sheet) sheet.hidden = true;
+    });
+  }
+  if (sheet) {
+    sheet.addEventListener("click", (e) => {
+      if (e.target === sheet) sheet.hidden = true;
+    });
   }
 }
 

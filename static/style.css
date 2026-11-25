@@ -1095,6 +1095,8 @@ body.login-only .brand p { display: none; }
   border: 0;
   cursor: pointer;
   border-radius: 14px;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .primary-btn {
@@ -1266,6 +1268,8 @@ body.login-only .brand p { display: none; }
 }
 
 .install-card {
+  display: block !important;
+  visibility: visible !important;
   margin: 14px 0 4px;
   padding: 14px 14px 12px;
   border-radius: 16px;
@@ -1309,6 +1313,39 @@ body.login-only .brand p { display: none; }
 
 .install-steps li {
   margin: 8px 0;
+}
+
+.install-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(16px + var(--safe-top)) 16px calc(24px + var(--safe-bottom));
+  background: rgba(5, 46, 22, 0.72);
+}
+
+.install-sheet[hidden] {
+  display: none !important;
+}
+
+.install-sheet-card {
+  width: min(92vw, 360px);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+  padding: 22px;
+}
+
+.install-sheet-card h3 {
+  margin: 0 0 12px;
+  color: var(--ink);
+}
+
+.install-sheet-card .primary-btn {
+  width: 100%;
 }
 
 .install-note[hidden] {
