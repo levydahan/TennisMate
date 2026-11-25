@@ -4,6 +4,8 @@ on:
   schedule:
     # Israel 19:00 and 21:01 on Sunday/Wednesday, covering IDT and IST.
     - cron: "1 16-19 * * 0,3"
+    # Thursday 11:00 Israel court-booking ping: 08:00 UTC (IDT) / 09:00 UTC (IST).
+    - cron: "0 8,9 * * 4"
   workflow_dispatch:
 
 jobs:

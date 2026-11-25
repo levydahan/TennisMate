@@ -3,6 +3,8 @@
 from datetime import date, datetime, timedelta
 
 from schedule import (
+    COURT_BOOK_TIME,
+    COURT_BOOK_WEEKDAY,
     FIELD_COST_NIS,
     HOUR_BEFORE_TIME,
     PAY_REMIND_TIME,
@@ -134,4 +136,52 @@ def build_hour_before_message(label_he: str, time_he: str = "20:00") -> dict:
         "body": f"המשחק ב{label_he} מתחיל ב־{time_he}. סמנו הגעה אם עוד לא.",
         "kind": "hour_before",
         "label_he": label_he,
+    }
+
+
+def next_court_book_at(now: datetime | None = None) -> datetime:
+    now = now_il() if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=TZ)
+    else:
+        now = now.astimezone(TZ)
+    days_ahead = (COURT_BOOK_WEEKDAY - now.weekday()) % 7
+    candidate = datetime.combine(now.date() + timedelta(days=days_ahead), COURT_BOOK_TIME, tzinfo=TZ)
+    if candidate <= now:
+        candidate += timedelta(days=7)
+    return candidate
+
+
+def court_book_week_key(now: datetime | None = None) -> str:
+    ping = next_court_book_at(now)
+    # If we are currently inside Thursday's send window, use today.
+    now = now_il() if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=TZ)
+    else:
+        now = now.astimezone(TZ)
+    if now.weekday() == COURT_BOOK_WEEKDAY:
+        return now.date().isoformat()
+    return ping.date().isoformat()
+
+
+def court_book_is_due(now: datetime | None = None, force: bool = False) -> bool:
+    now = now_il() if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=TZ)
+    else:
+        now = now.astimezone(TZ)
+    if force:
+        return True
+    if now.weekday() != COURT_BOOK_WEEKDAY:
+        return False
+    ping = datetime.combine(now.date(), COURT_BOOK_TIME, tzinfo=TZ)
+    return ping <= now < ping + timedelta(hours=1)
+
+
+def build_court_book_message() -> dict:
+    return {
+        "title": "הזמנת מגרש · טניסמייט",
+        "body": "יום חמישי 11:00 · הזמינו עכשיו מגרש בלזוז למשחקים הקרובים.",
+        "kind": "court_book",
     }

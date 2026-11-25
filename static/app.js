@@ -832,6 +832,7 @@ function renderNotifyBlock() {
   const perm = notifyPermission();
   const hourHe = state.hour_before_at_he || "";
   const payHe = state.pay_reminder_at_he || "";
+  const courtHe = state.court_book_at_he || "";
   const since = user.notify_since_he || "";
   const devices = user.notify_devices || 0;
   const adminBtn = state.is_admin
@@ -841,20 +842,23 @@ function renderNotifyBlock() {
     return `
       <div class="notify-card">
         <p class="notify-title">התראות</p>
-        <p class="notify-copy">שעה לפני המשחק, ואחרי המשחק תזכורת תשלום — רק לחשבון שלך.</p>
+        <p class="notify-copy">שעה לפני המשחק, חמישי 11:00 להזמנת מגרש, ואחרי המשחק תזכורת תשלום — רק לחשבון שלך.</p>
         <button id="notifyBtn" class="primary-btn notify-btn" type="button">הפעלת התראות</button>
         ${adminBtn}
       </div>
     `;
   }
-  const deviceLine = perm === "granted"
+  const approved = perm === "granted";
+  const deviceLine = approved
     ? "במכשיר זה: מאושר"
     : perm === "denied"
       ? "במכשיר זה: חסום בהגדרות הדפדפן"
       : perm === "unsupported"
         ? "במכשיר זה: אין תמיכה בהתראות"
         : "במכשיר זה: צריך לאשר";
-  const retryLabel = perm === "granted" ? "רענון במכשיר זה" : "הפעלה במכשיר זה";
+  const enableBtn = approved
+    ? ""
+    : `<button id="notifyBtn" class="ghost-btn notify-btn" type="button">הפעלה במכשיר זה</button>`;
   return `
     <div class="notify-card is-on">
       <p class="notify-title">התראות פעילות</p>
@@ -864,10 +868,24 @@ function renderNotifyBlock() {
         <li>מכשירים רשומים: ${devices}</li>
         ${since ? `<li>הופעל: ${esc(since)}</li>` : ""}
         <li>הבא · שעה לפני: ${esc(hourHe || "כשיהיה משחק")}</li>
+        <li>הבא · הזמנת מגרש: ${esc(courtHe || "חמישי 11:00")}</li>
         <li>הבא · תשלום: ${esc(payHe || "אחרי המשחק")}</li>
       </ul>
-      <button id="notifyBtn" class="ghost-btn notify-btn" type="button">${retryLabel}</button>
+      ${enableBtn}
       ${adminBtn}
+    </div>
+  `;
+}
+
+function renderInstallBlock() {
+  if (isStandaloneApp() || !canOfferInstall()) return "";
+  return `
+    <div class="install-card">
+      <button type="button" class="ghost-btn install-btn" id="homeInstallBtn">
+        <img class="install-btn-icon" src="/static/racket-icon.png" alt="" />
+        הוספה למסך הבית
+      </button>
+      <p id="homeInstallNote" class="install-note" hidden></p>
     </div>
   `;
 }
@@ -902,7 +920,10 @@ function renderHome() {
           <span class="avatar-action">${photo ? "החלפת תמונה" : "הוספת תמונה"}</span>
         </label>
         <div>
-          <h2>שלום ${esc(name)}</h2>
+          <h2 class="hello-title">
+            <img class="hello-app-icon" src="/static/racket-icon.png" alt="" />
+            <span>שלום ${esc(name)}</span>
+          </h2>
           <p class="muted">${nextUpcomingGame() && nextUpcomingGame().location
             ? `המשחק הבא: ${esc(nextUpcomingGame().game_at_he)} · ${esc(nextUpcomingGame().location)}`
             : "ברוך הבא לטניסמייט. משחקים ביום ראשון ויום רביעי ב־20:00."}</p>
@@ -920,12 +941,17 @@ function renderHome() {
       </div>
       ${cta}
       ${renderNotifyBlock()}
+      ${renderInstallBlock()}
     </section>
   `;
   const notifyBtn = document.getElementById("notifyBtn");
   if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
   const testPushBtn = document.getElementById("testPushBtn");
   if (testPushBtn) testPushBtn.addEventListener("click", testPush);
+  bindInstallButton(
+    document.getElementById("homeInstallBtn"),
+    document.getElementById("homeInstallNote")
+  );
   const avatarInput = document.getElementById("avatarInput");
   if (avatarInput) avatarInput.addEventListener("change", onAvatarPicked);
 }
@@ -1425,6 +1451,14 @@ function scheduleLocalReminders(registration) {
       "tennismate-hour"
     );
   }, "_hour");
+  scheduleAt(state.court_book_at, () => {
+    showLocalNote(
+      registration,
+      "הזמנת מגרש · טניסמייט",
+      "יום חמישי 11:00 · הזמינו עכשיו מגרש בלזוז למשחקים הקרובים.",
+      "tennismate-court"
+    );
+  }, "_court");
 }
 
 const HERO_COLLAPSE_KEY = "tm-hero-collapsed";
@@ -1675,53 +1709,71 @@ function isPhoneLike() {
     || /android|iphone|ipad|ipod/i.test(navigator.userAgent || "");
 }
 
-function initInstallApp() {
-  const btn = document.getElementById("installAppBtn");
-  const note = document.getElementById("installAppNote");
+let deferredInstallPrompt = null;
+
+function canOfferInstall() {
+  if (isStandaloneApp()) return false;
+  return isPhoneLike() || Boolean(deferredInstallPrompt);
+}
+
+function setInstallButtonsHidden(hidden) {
+  document.querySelectorAll("#installAppBtn, #homeInstallBtn").forEach((btn) => {
+    btn.hidden = hidden;
+  });
+  if (hidden) {
+    document.querySelectorAll("#installAppNote, #homeInstallNote").forEach((note) => {
+      note.hidden = true;
+    });
+  }
+}
+
+async function promptInstallApp(note) {
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    try {
+      await deferredInstallPrompt.userChoice;
+    } catch (err) {}
+    deferredInstallPrompt = null;
+    setInstallButtonsHidden(true);
+    return;
+  }
+  if (note) {
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
+    note.hidden = false;
+    note.textContent = ios
+      ? "בספארי לחצו על שיתוף (הריבוע עם החץ למעלה) ואז על הוספה למסך הבית."
+      : "בתפריט הדפדפן (⋮) בחרו הוספה למסך הבית או התקנת אפליקציה.";
+  }
+}
+
+function bindInstallButton(btn, note) {
   if (!btn) return;
-  if (isStandaloneApp()) {
+  if (!canOfferInstall()) {
     btn.hidden = true;
     return;
   }
-  let deferredPrompt = null;
+  btn.hidden = false;
+  btn.addEventListener("click", () => promptInstallApp(note));
+}
 
-  function showInstall() {
-    if (!isPhoneLike() && !deferredPrompt) {
-      btn.hidden = true;
-      return;
-    }
-    btn.hidden = false;
+function initInstallApp() {
+  if (isStandaloneApp()) {
+    setInstallButtonsHidden(true);
+    return;
   }
-
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
-    deferredPrompt = e;
-    showInstall();
+    deferredInstallPrompt = e;
+    setInstallButtonsHidden(false);
   });
   window.addEventListener("appinstalled", () => {
-    deferredPrompt = null;
-    btn.hidden = true;
-    if (note) note.hidden = true;
+    deferredInstallPrompt = null;
+    setInstallButtonsHidden(true);
   });
-  btn.addEventListener("click", async () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      try {
-        await deferredPrompt.userChoice;
-      } catch (err) {}
-      deferredPrompt = null;
-      if (note) note.hidden = true;
-      return;
-    }
-    if (note) {
-      const ios = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
-      note.hidden = false;
-      note.textContent = ios
-        ? "בספארי לחצו על שיתוף (הריבוע עם החץ למעלה) ואז על הוספה למסך הבית."
-        : "בתפריט הדפדפן (⋮) בחרו הוספה למסך הבית או התקנת אפליקציה.";
-    }
-  });
-  showInstall();
+  bindInstallButton(
+    document.getElementById("installAppBtn"),
+    document.getElementById("installAppNote")
+  );
 }
 
 initAuth();

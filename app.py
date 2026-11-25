@@ -15,9 +15,13 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from pairing import explain_pairs
 from players import FIXED_PLAYERS, canonical_player, normalize_name
 from reminders import (
+    build_court_book_message,
     build_hour_before_message,
     build_pay_message,
+    court_book_is_due,
+    court_book_week_key,
     hour_before_is_due,
+    next_court_book_at,
     next_hour_before_at,
     next_pay_reminder_at,
     reminder_is_due,
@@ -195,6 +199,14 @@ class HourBeforeLog(db.Model):
     __table_args__ = (
         db.UniqueConstraint("slot", "week_key", name="uq_hour_before_slot_week"),
     )
+
+
+class CourtBookLog(db.Model):
+    __tablename__ = "court_book_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    week_key = db.Column(db.String(16), nullable=False, unique=True)
+    sent_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 class AppSetting(db.Model):
@@ -1220,6 +1232,26 @@ def run_hour_before_reminders(force: bool = False) -> dict:
     }
 
 
+def run_court_book_reminders(force: bool = False) -> dict:
+    now = now_il()
+    week_key = court_book_week_key(now)
+    if not court_book_is_due(now, force=force):
+        return {"ok": True, "sent": [], "skipped": [{"reason": "not_due"}]}
+    already = CourtBookLog.query.filter_by(week_key=week_key).first()
+    if already and not force:
+        return {"ok": True, "sent": [], "skipped": [{"week_key": week_key, "reason": "already_sent"}]}
+    message = build_court_book_message()
+    pushed = dispatch_web_push(message)
+    if not already:
+        db.session.add(CourtBookLog(week_key=week_key))
+        db.session.commit()
+    return {
+        "ok": True,
+        "sent": [{**message, "week_key": week_key, "pushed": pushed}],
+        "skipped": [],
+    }
+
+
 def public_state() -> dict:
     me = current_user()
     debt = unpaid_debt(me)
@@ -1249,6 +1281,7 @@ def public_state() -> dict:
     times = load_time_overrides()
     nxt = next_pay_reminder_at(date_overrides=overrides, time_overrides=times)
     hour_before = next_hour_before_at(date_overrides=overrides, time_overrides=times)
+    court_book = next_court_book_at()
     match_at = todays_match_game_at(date_overrides=overrides, time_overrides=times)
     upcoming = next_game_at(date_overrides=overrides, time_overrides=times)
     target = banner_target(date_overrides=overrides, time_overrides=times)
@@ -1273,6 +1306,8 @@ def public_state() -> dict:
         "pay_reminder_at_he": format_dt_he(nxt),
         "hour_before_at": hour_before.isoformat(),
         "hour_before_at_he": format_dt_he(hour_before),
+        "court_book_at": court_book.isoformat(),
+        "court_book_at_he": format_dt_he(court_book),
         "is_match_day": is_match_day(date_overrides=overrides, time_overrides=times),
         "banner_flash": banner_should_flash(date_overrides=overrides, time_overrides=times),
         "banner_mode": target["mode"],
@@ -2005,13 +2040,15 @@ def cron_pay_reminder():
     force = _cron_force()
     pay = run_pay_reminders(force=force)
     hour = run_hour_before_reminders(force=False)
-    sent = list(hour.get("sent") or []) + list(pay.get("sent") or [])
+    court = run_court_book_reminders(force=False)
+    sent = list(hour.get("sent") or []) + list(pay.get("sent") or []) + list(court.get("sent") or [])
     result = {
         "ok": True,
         "sent": sent,
-        "skipped": list(hour.get("skipped") or []) + list(pay.get("skipped") or []),
+        "skipped": list(hour.get("skipped") or []) + list(pay.get("skipped") or []) + list(court.get("skipped") or []),
         "hour_before": hour,
         "pay": pay,
+        "court_book": court,
     }
     if sent:
         result["message"] = sent[0]["body"]

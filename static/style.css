@@ -240,6 +240,22 @@ body.login-only .topbar-end {
   margin-bottom: 4px;
 }
 
+.hello-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+
+.hello-app-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex: none;
+  box-shadow: 0 0 0 2px #bbf7d0;
+}
+
 .profile-row .muted {
   margin-bottom: 0;
 }
@@ -1230,8 +1246,28 @@ body.login-only .brand p { display: none; }
 }
 
 .install-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   width: 100%;
   margin-top: 14px;
+}
+
+.install-btn-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex: none;
+}
+
+.install-card {
+  margin-top: 12px;
+}
+
+.install-card .install-btn {
+  margin-top: 0;
 }
 
 .install-note {
