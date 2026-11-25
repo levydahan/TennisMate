@@ -857,14 +857,15 @@ function renderNotifyBlock() {
 }
 
 function renderInstallBlock() {
-  if (isStandaloneApp()) return "";
   const note = installHelpText
     ? `<p id="homeInstallNote" class="install-note">${esc(installHelpText)}</p>`
     : `<p id="homeInstallNote" class="install-note" hidden></p>`;
   return `
     <div class="install-card">
-      <button type="button" class="ghost-btn install-btn" id="homeInstallBtn">
-        <img class="install-btn-icon" src="/static/racket-icon.png" alt="" />
+      <p class="notify-title">מסך הבית</p>
+      <p class="notify-copy">כדי לפתוח את טניסמייט כמו אפליקציה, הוסיפו קיצור למסך הבית.</p>
+      <button type="button" class="primary-btn install-btn" id="homeInstallBtn">
+        <img class="install-btn-icon" src="/static/racket-icon-192.png" alt="" />
         הוספה למסך הבית
       </button>
       ${note}
@@ -1688,9 +1689,8 @@ function initTabs() {
 }
 
 function isStandaloneApp() {
-  return window.matchMedia("(display-mode: standalone)").matches
-    || window.matchMedia("(display-mode: fullscreen)").matches
-    || Boolean(navigator.standalone);
+  return Boolean(navigator.standalone)
+    || window.matchMedia("(display-mode: standalone)").matches;
 }
 
 function isPhoneLike() {
@@ -1804,10 +1804,6 @@ async function promptInstallApp(note) {
 }
 
 function initInstallApp() {
-  if (isStandaloneApp()) {
-    setInstallButtonsHidden(true);
-    return;
-  }
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     deferredInstallPrompt = e;

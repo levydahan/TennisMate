@@ -1266,8 +1266,8 @@ body.login-only .brand p { display: none; }
 }
 
 .install-card {
-  margin-top: 12px;
-  padding: 14px;
+  margin: 14px 0 4px;
+  padding: 14px 14px 12px;
   border-radius: 16px;
   background: #ecfdf3;
   border: 1px solid #bbf7d0;
@@ -1275,6 +1275,12 @@ body.login-only .brand p { display: none; }
 
 .install-card .install-btn {
   margin-top: 0;
+  background: #14532d;
+  color: #ecfdf3;
+}
+
+.install-card .install-btn-icon {
+  background: #fff;
 }
 
 .install-note {
