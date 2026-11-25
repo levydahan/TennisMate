@@ -1735,11 +1735,11 @@ function installHelpContent() {
       };
     }
     return {
-      lead: "באייפון עם כרום מוסיפים למסך הבית כך:",
+      lead: "בכרום באייפון נפתח חלון השיתוף. משם זה לוקח לחיצה אחת:",
       steps: [
-        "לחצו על התפריט ⋮ של כרום (למטה או למעלה).",
-        "לחצו שיתוף.",
-        "בחרו הוספה למסך הבית, ואז הוסף.",
+        "בחלון שנפתח בחרו הוספה למסך הבית.",
+        "לחצו הוסף.",
+        "אם החלון לא נפתח: תפריט ⋮ בכרום ← שיתוף ← הוספה למסך הבית.",
       ],
     };
   }
@@ -1826,6 +1826,20 @@ function setInstallButtonsHidden(hidden) {
   }
 }
 
+async function shareInstallLink() {
+  if (typeof navigator.share !== "function") return false;
+  try {
+    await navigator.share({
+      title: "טניסמייט",
+      text: "טניסמייט",
+      url: `${window.location.origin}/`,
+    });
+    return true;
+  } catch (err) {
+    return Boolean(err && err.name === "AbortError");
+  }
+}
+
 async function promptInstallApp(note) {
   const promptEvent = deferredInstallPrompt;
   if (!isIOSDevice() && promptEvent && typeof promptEvent.prompt === "function") {
@@ -1841,6 +1855,10 @@ async function promptInstallApp(note) {
     } catch (err) {
       deferredInstallPrompt = null;
     }
+  }
+  if (isIOSDevice()) {
+    const shared = await shareInstallLink();
+    if (shared) return;
   }
   showInstallHelp(note);
 }
