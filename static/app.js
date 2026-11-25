@@ -5,6 +5,7 @@ const statsListsEl = document.getElementById("statsLists");
 // and starts empty so the screen always opens fully minimized.
 const statsOpen = new Set();
 const homeViewEl = document.getElementById("homeView");
+const homeInstallViewEl = document.getElementById("homeInstallView");
 const matchDayViewEl = document.getElementById("matchDayView");
 const appTabsEl = document.getElementById("appTabs");
 const toastEl = document.getElementById("toast");
@@ -918,7 +919,7 @@ function renderHome() {
             : "ברוך הבא לטניסמייט. משחקים ביום ראשון ויום רביעי ב־20:00."}</p>
         </div>
       </div>
-      ${renderInstallBlock()}
+      <button type="button" class="hello-logout home-logout" id="homeLogoutBtn">יציאה</button>
       <ul class="welcome-stats">
         <li><strong>${mine.arrived || 0}</strong><span>משחקים שהגעת</span></li>
         <li><strong>${mine.missed || 0}</strong><span>משחקים שפספסת</span></li>
@@ -933,6 +934,7 @@ function renderHome() {
       ${renderNotifyBlock()}
     </section>
   `;
+  if (homeInstallViewEl) homeInstallViewEl.innerHTML = renderInstallBlock();
   const notifyBtn = document.getElementById("notifyBtn");
   if (notifyBtn) notifyBtn.addEventListener("click", registerPush);
   const testPushBtn = document.getElementById("testPushBtn");
@@ -1040,28 +1042,13 @@ function renderMatchBanner() {
 
 function renderAuth() {
   const loggedOut = document.getElementById("authLoggedOut");
-  const loggedIn = document.getElementById("authLoggedIn");
-  const hello = document.getElementById("authHello");
-  const helloAvatar = document.getElementById("helloAvatar");
   const authCard = document.getElementById("authCard");
   const payWarn = document.getElementById("payWarn");
   if (state.user) {
     if (loggedOut) loggedOut.hidden = true;
-    if (loggedIn) loggedIn.hidden = false;
     if (authCard) authCard.hidden = true;
-    if (hello) hello.textContent = state.user.name;
-    if (helloAvatar) {
-      if (state.user.avatar) {
-        helloAvatar.hidden = false;
-        helloAvatar.src = state.user.avatar;
-      } else {
-        helloAvatar.hidden = true;
-        helloAvatar.removeAttribute("src");
-      }
-    }
   } else {
     if (loggedOut) loggedOut.hidden = false;
-    if (loggedIn) loggedIn.hidden = true;
     if (authCard) authCard.hidden = false;
   }
   if (payWarn) {
@@ -1081,6 +1068,7 @@ function render() {
   applyScreen();
   if (!isPlayerLoggedIn()) {
     if (homeViewEl) homeViewEl.innerHTML = "";
+    if (homeInstallViewEl) homeInstallViewEl.innerHTML = "";
     if (matchDayViewEl) matchDayViewEl.innerHTML = "";
     if (gamesEl) gamesEl.innerHTML = "";
     if (pastGamesEl) pastGamesEl.innerHTML = "";
@@ -1513,11 +1501,16 @@ function applyAuthResult(data) {
   }
 }
 
+async function logoutUser() {
+  resetLandingTab();
+  const data = await api("/api/logout", {});
+  applyState(data);
+}
+
 function initAuth() {
   const form = document.getElementById("authForm");
   const registerBtn = document.getElementById("authRegisterBtn");
   const resetBtn = document.getElementById("authResetBtn");
-  const logoutBtn = document.getElementById("logoutBtn");
   const nameBlock = document.getElementById("authNameBlock");
   const resetNote = document.getElementById("authResetNote");
   const title = document.getElementById("authTitle");
@@ -1574,13 +1567,6 @@ function initAuth() {
     });
   }
 
-  if (logoutBtn) {
-    logoutBtn.addEventListener("click", async () => {
-      resetLandingTab();
-      const data = await api("/api/logout", {});
-      applyState(data);
-    });
-  }
 }
 
 function applyHeroCollapsed(collapsed) {
@@ -1898,14 +1884,23 @@ const payWarnBtn = document.getElementById("payWarn");
 if (payWarnBtn) payWarnBtn.addEventListener("click", scrollToUnpaidGame);
 if (homeViewEl) {
   homeViewEl.addEventListener("click", (e) => {
-    const install = e.target.closest("#homeInstallBtn");
-    if (install) {
+    const logout = e.target.closest("#homeLogoutBtn");
+    if (logout) {
       e.preventDefault();
-      promptInstallApp(document.getElementById("homeInstallNote"));
+      logoutUser();
       return;
     }
     const go = e.target.closest("[data-go-tab]");
     if (go) setTab(go.dataset.goTab);
+  });
+}
+if (homeInstallViewEl) {
+  homeInstallViewEl.addEventListener("click", (e) => {
+    const install = e.target.closest("#homeInstallBtn");
+    if (install) {
+      e.preventDefault();
+      promptInstallApp(document.getElementById("homeInstallNote"));
+    }
   });
 }
 if (matchDayViewEl) {

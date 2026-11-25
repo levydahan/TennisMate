@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=57" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=58" />
 </head>
 <body class="login-only">
   <div id="topBanners" class="top-banners">
@@ -37,11 +37,6 @@
       </div>
     </div>
     <div class="topbar-end">
-      <div id="authLoggedIn" class="hello-line" hidden>
-        <img id="helloAvatar" class="hello-avatar" alt="" hidden />
-        <span>שלום <strong id="authHello"></strong></span>
-        <button type="button" class="hello-logout" id="logoutBtn">יציאה</button>
-      </div>
       <button id="adminBtn" class="ghost-btn" type="button">מנהל</button>
     </div>
   </header>
@@ -86,6 +81,7 @@
               allowfullscreen></iframe>
           </div>
         </section>
+        <div id="homeInstallView"></div>
       </section>
       <section class="tab-panel" id="tabEnroll" data-tab="enroll" hidden>
         <h2 class="tab-heading">הרשמה</h2>
@@ -167,6 +163,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=63"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=64"></script>
 </body>
 </html>

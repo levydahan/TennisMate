@@ -168,29 +168,40 @@ main, #appScreen, .tab-panel {
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  position: relative;
   gap: 12px;
   margin-bottom: 18px;
+  text-align: center;
 }
 
 body.login-only .topbar {
   flex-direction: column;
-  justify-content: center;
-  text-align: center;
 }
 
-body.login-only .brand {
+.brand {
+  display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
+  gap: 8px;
 }
 
-body.login-only .brand h1,
-body.login-only .brand p {
+.brand h1,
+.brand p {
   text-align: center;
 }
 
 body.login-only .topbar-end {
+  position: static;
   justify-content: center;
+  width: 100%;
+}
+
+body:not(.login-only) .topbar-end {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 0;
 }
 
 .topbar-end {
@@ -322,7 +333,13 @@ body.login-only .topbar-end {
   text-decoration: underline;
 }
 
-.brand { display: flex; align-items: center; gap: 12px; }
+.home-logout {
+  display: block;
+  margin: 2px 0 12px;
+  color: #166534;
+  text-align: start;
+}
+
 .brand h1 { margin: 0; font-size: 1.7rem; line-height: 1.1; }
 .brand p { margin: 2px 0 0; color: #bbf7d0; font-size: 0.92rem; }
 body.login-only .brand p { display: none; }
@@ -1275,6 +1292,11 @@ body.login-only .brand p { display: none; }
   border-radius: 16px;
   background: #ecfdf3;
   border: 1px solid #bbf7d0;
+}
+
+#homeInstallView .install-card {
+  max-width: var(--content-max);
+  margin: 0 auto 16px;
 }
 
 .install-card .install-btn {
