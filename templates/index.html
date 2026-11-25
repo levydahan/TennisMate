@@ -2,9 +2,11 @@
 <html lang="he" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#14532d" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>טניסמייט · ניהול משחקים</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='racket-icon.png') }}" />
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='racket-icon.png') }}" />
@@ -12,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=45" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=49" />
 </head>
 <body class="login-only">
   <div id="topBanners" class="top-banners">
@@ -68,6 +70,8 @@
           </div>
         </form>
         <p id="authResetNote" class="reset-note" hidden></p>
+        <button type="button" class="ghost-btn install-btn" id="installAppBtn" hidden>הוספה למסך הבית</button>
+        <p id="installAppNote" class="install-note" hidden></p>
       </div>
     </section>
     <div id="appScreen" hidden>
@@ -144,6 +148,6 @@
     </form>
   </dialog>
 
-  <script src="{{ url_for('static', filename='app.js') }}?v=48"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v=51"></script>
 </body>
 </html>

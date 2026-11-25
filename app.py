@@ -96,6 +96,9 @@ app.config["MAX_CONTENT_LENGTH"] = 400 * 1024
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "0508716669")
 PAY_WARNING = "הלו הלו לא שילמת למשחקת תשלם עכשיו"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+DEMO_EMAIL = "testuser"
+DEMO_PASSWORD = "testuser"
+DEMO_NAME = "טסט"
 
 
 def bit_pay_phone() -> str:
@@ -210,7 +213,22 @@ def init_db():
     with app.app_context():
         db.create_all()
         _ensure_schema()
+        ensure_demo_user()
     _db_ready = True
+
+
+def ensure_demo_user():
+    """Local-only login: email testuser / password testuser."""
+    if os.environ.get("RENDER"):
+        return
+    if User.query.filter_by(email=DEMO_EMAIL).first():
+        return
+    db.session.add(User(
+        email=DEMO_EMAIL,
+        password_hash=generate_password_hash(DEMO_PASSWORD),
+        name=DEMO_NAME,
+    ))
+    db.session.commit()
 
 
 def _ensure_schema():
@@ -1286,7 +1304,7 @@ def api_login():
     password = str(data.get("password") or "")
     if not email:
         return jsonify({"ok": False, "message": "יש להזין אימייל"}), 400
-    if not EMAIL_RE.match(email):
+    if email != DEMO_EMAIL and not EMAIL_RE.match(email):
         return jsonify({"ok": False, "message": "אימייל לא תקין"}), 400
     if not password:
         return jsonify({"ok": False, "message": "יש להזין סיסמה"}), 400
