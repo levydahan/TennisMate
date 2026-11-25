@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, timedelta
 
+from players import canonical_player
 from schedule import (
     COURT_BOOK_TIME,
     COURT_BOOK_WEEKDAY,
@@ -184,4 +185,103 @@ def build_court_book_message() -> dict:
         "title": "הזמנת מגרש · טניסמייט",
         "body": "יום חמישי 11:00 · הזמינו עכשיו מגרש בלזוז למשחקים הקרובים.",
         "kind": "court_book",
+    }
+
+
+def next_draw_at(
+    now: datetime | None = None,
+    date_overrides: dict | None = None,
+    time_overrides: dict | None = None,
+) -> datetime:
+    now = now_il() if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=TZ)
+    else:
+        now = now.astimezone(TZ)
+    candidates = []
+    for slot_key in SLOTS:
+        state = get_slot_state(slot_key, now, date_overrides, time_overrides)
+        dt = datetime.fromisoformat(state["draw_at"]).astimezone(TZ)
+        if dt <= now:
+            dt = dt + timedelta(days=7)
+        candidates.append(dt)
+    return min(candidates)
+
+
+def draw_is_due(state: dict, now: datetime | None = None, force: bool = False) -> bool:
+    now = now_il() if now is None else now
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=TZ)
+    else:
+        now = now.astimezone(TZ)
+    if force:
+        return bool(state.get("teams_ready")) and not state.get("is_ended")
+    if not state.get("teams_ready") or state.get("is_ended"):
+        return False
+    raw = state.get("draw_at")
+    if not raw:
+        return False
+    start = datetime.fromisoformat(raw).astimezone(TZ)
+    return start <= now < start + timedelta(hours=1)
+
+
+def _team_player_names(team: dict) -> list[str]:
+    names = []
+    for player in team.get("players") or []:
+        raw = player.get("name") or ""
+        names.append(canonical_player(raw) or raw)
+    return [name for name in names if name]
+
+
+def format_draw_line(teams: list | None) -> str:
+    parts = []
+    for team in teams or []:
+        names = _team_player_names(team)
+        if len(names) == 2:
+            parts.append(f"{names[0]} ו{names[1]}")
+        elif len(names) == 1:
+            parts.append(f"{names[0]} ממתין")
+    return " · ".join(parts)
+
+
+def partner_in_draw(player_name: str, teams: list | None) -> tuple[str | None, bool]:
+    me = canonical_player(player_name) or player_name
+    for team in teams or []:
+        names = _team_player_names(team)
+        if me not in names:
+            continue
+        others = [name for name in names if name != me]
+        return (" · ".join(others) if others else None, len(names) == 1)
+    return None, False
+
+
+def build_draw_message(
+    label_he: str, player_name: str, teams: list | None, teams2: list | None
+) -> dict:
+    bits = []
+    hour1 = format_draw_line(teams)
+    if hour1:
+        bits.append(f"שעה 1: {hour1}")
+    hour2 = format_draw_line(teams2)
+    if hour2:
+        bits.append(f"שעה 2: {hour2}")
+    mine1, wait1 = partner_in_draw(player_name, teams)
+    mine2, wait2 = partner_in_draw(player_name, teams2)
+    you = []
+    if wait1:
+        you.append("שעה 1 ממתינים")
+    elif mine1:
+        you.append(f"שעה 1 עם {mine1}")
+    if wait2:
+        you.append("שעה 2 ממתינים")
+    elif mine2:
+        you.append(f"שעה 2 עם {mine2}")
+    if you:
+        bits.append("אתה: " + " · ".join(you))
+    return {
+        "title": f"ההגרלה יצאה · {label_he}",
+        "body": " · ".join(bits) if bits else "ההגרלה יצאה. בדקו את הזוגות בטניסמייט.",
+        "kind": "draw",
+        "tag": "tennismate-draw",
+        "label_he": label_he,
     }

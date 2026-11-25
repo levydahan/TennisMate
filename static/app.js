@@ -833,6 +833,7 @@ function renderNotifyBlock() {
   const hourHe = state.hour_before_at_he || "";
   const payHe = state.pay_reminder_at_he || "";
   const courtHe = state.court_book_at_he || "";
+  const drawHe = state.draw_at_he || "";
   const since = user.notify_since_he || "";
   const devices = user.notify_devices || 0;
   const adminBtn = state.is_admin
@@ -842,7 +843,7 @@ function renderNotifyBlock() {
     return `
       <div class="notify-card">
         <p class="notify-title">התראות</p>
-        <p class="notify-copy">שעה לפני המשחק, חמישי 11:00 להזמנת מגרש, ואחרי המשחק תזכורת תשלום — רק לחשבון שלך.</p>
+        <p class="notify-copy">הגרלה ב־12:00 ביום משחק, שעה לפני, חמישי 11:00 להזמנת מגרש, ואחרי המשחק תזכורת תשלום.</p>
         <button id="notifyBtn" class="primary-btn notify-btn" type="button">הפעלת התראות</button>
         ${adminBtn}
       </div>
@@ -867,6 +868,7 @@ function renderNotifyBlock() {
         <li>${esc(deviceLine)}</li>
         <li>מכשירים רשומים: ${devices}</li>
         ${since ? `<li>הופעל: ${esc(since)}</li>` : ""}
+        <li>הבא · הגרלה: ${esc(drawHe || "12:00 ביום משחק")}</li>
         <li>הבא · שעה לפני: ${esc(hourHe || "כשיהיה משחק")}</li>
         <li>הבא · הזמנת מגרש: ${esc(courtHe || "חמישי 11:00")}</li>
         <li>הבא · תשלום: ${esc(payHe || "אחרי המשחק")}</li>
@@ -1459,6 +1461,14 @@ function scheduleLocalReminders(registration) {
       "tennismate-court"
     );
   }, "_court");
+  scheduleAt(state.draw_at, () => {
+    showLocalNote(
+      registration,
+      "ההגרלה יצאה · טניסמייט",
+      "הזוגות מוכנים. פתחו את טניסמייט לראות עם מי אתה משחק.",
+      "tennismate-draw"
+    );
+  }, "_draw");
 }
 
 const HERO_COLLAPSE_KEY = "tm-hero-collapsed";
