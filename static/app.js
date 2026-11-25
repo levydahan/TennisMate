@@ -911,6 +911,7 @@ function renderHome() {
             : "ברוך הבא לטניסמייט. משחקים ביום ראשון ויום רביעי ב־20:00."}</p>
         </div>
       </div>
+      ${renderInstallBlock()}
       <ul class="welcome-stats">
         <li><strong>${mine.arrived || 0}</strong><span>משחקים שהגעת</span></li>
         <li><strong>${mine.missed || 0}</strong><span>משחקים שפספסת</span></li>
@@ -923,7 +924,6 @@ function renderHome() {
       </div>
       ${cta}
       ${renderNotifyBlock()}
-      ${renderInstallBlock()}
     </section>
   `;
   const notifyBtn = document.getElementById("notifyBtn");
@@ -1500,7 +1500,10 @@ function applyAuthResult(data) {
   }
   applyState(data);
   if (!data.ok && data.message) showAuthError(data.message, { toast: false });
-  if (data.ok && data.user) window.scrollTo(0, 0);
+  if (data.ok && data.user) {
+    setTab("home");
+    window.scrollTo(0, 0);
+  }
 }
 
 function initAuth() {
@@ -1770,12 +1773,12 @@ function showInstallHelp(note) {
 }
 
 function setInstallButtonsHidden(hidden) {
-  document.querySelectorAll("#installAppBtn, #homeInstallBtn").forEach((btn) => {
+  document.querySelectorAll("#homeInstallBtn").forEach((btn) => {
     btn.hidden = hidden;
   });
   if (hidden) {
     installHelpText = "";
-    document.querySelectorAll("#installAppNote, #homeInstallNote").forEach((note) => {
+    document.querySelectorAll("#homeInstallNote").forEach((note) => {
       note.hidden = true;
     });
   }
@@ -1800,19 +1803,6 @@ async function promptInstallApp(note) {
   showInstallHelp(note);
 }
 
-function bindInstallButton(btn, note) {
-  if (!btn) return;
-  if (isStandaloneApp()) {
-    btn.hidden = true;
-    return;
-  }
-  btn.hidden = false;
-  btn.addEventListener("click", (e) => {
-    e.preventDefault();
-    promptInstallApp(note);
-  });
-}
-
 function initInstallApp() {
   if (isStandaloneApp()) {
     setInstallButtonsHidden(true);
@@ -1831,10 +1821,6 @@ function initInstallApp() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
   }
-  bindInstallButton(
-    document.getElementById("installAppBtn"),
-    document.getElementById("installAppNote")
-  );
 }
 
 initAuth();
