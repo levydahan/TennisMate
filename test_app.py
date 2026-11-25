@@ -636,6 +636,11 @@ class JoinAndWaitlistTests(unittest.TestCase):
             else:
                 os.environ["BIT_PAY_PHONE"] = old
 
+    def test_state_exposes_vapid_public_key(self):
+        data = self.client.get("/api/state").get_json()
+        self.assertTrue(data.get("vapid_public_key"))
+        self.assertGreater(len(data["vapid_public_key"]), 20)
+
     def test_cron_pay_reminder_unauthorized_on_render(self):
         old = os.environ.get("RENDER")
         os.environ["RENDER"] = "1"

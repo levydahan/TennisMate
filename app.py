@@ -1061,10 +1061,12 @@ def _cron_authorized() -> bool:
 def dispatch_web_push(message: dict) -> int:
     public, private = _ensure_vapid_keys()
     if not public or not private:
+        app.logger.warning("Web push skipped: VAPID keys are not available")
         return 0
     try:
         from pywebpush import webpush
     except ImportError:
+        app.logger.warning("Web push skipped: pywebpush is not installed")
         return 0
     sent = 0
     for row in PushSubscription.query.all():
@@ -1079,7 +1081,7 @@ def dispatch_web_push(message: dict) -> int:
                     "body": message["body"],
                 }, ensure_ascii=False),
                 vapid_private_key=private,
-                vapid_claims={"sub": "mailto:tennismate@localhost"},
+                vapid_claims={"sub": "mailto:tennismate@onrender.com"},
             )
             sent += 1
         except Exception as exc:

@@ -1,0 +1,24 @@
+name: TennisMate reminders
+
+on:
+  schedule:
+    # Israel 19:00 and 21:01 on Sunday/Wednesday, covering IDT and IST.
+    - cron: "1 16-19 * * 0,3"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Render reminder endpoint
+        env:
+          SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$SECRET" ]; then
+            echo "Add a GitHub Actions secret named CRON_SECRET with the same value as Render CRON_SECRET."
+            exit 1
+          fi
+          curl -fsS \
+            -H "Authorization: Bearer $SECRET" \
+            -H "X-Cron-Secret: $SECRET" \
+            "https://tennismate.onrender.com/api/cron/pay-reminder"
